@@ -1,0 +1,16 @@
+[project]
+name = "home-assistant-xiaodu"
+version = "0.1.0"
+description = "Home Assistant custom integration for Xiaodu (DuerOS)"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+  "pytest-homeassistant-custom-component>=0.13.0",
+  "homeassistant>=2025.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

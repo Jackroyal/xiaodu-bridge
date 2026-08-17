@@ -1,0 +1,74 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "小度集成已配置。",
+      "reconfigure_successful": "配置已更新成功。"
+    },
+    "error": {
+      "invalid_credentials": "Client_Id 和 ClientSecret 不能为空。",
+      "invalid_url": "必须是合法的 https:// 地址。",
+      "invalid_bot_id": "小度技能ID（botId）不能为空。"
+    },
+    "step": {
+      "user": {
+        "title": "连接小度",
+        "description": "在小度技能开放平台创建「智能家居」技能，然后填写以下信息。Client_Id 与 ClientSecret 由你自己定义（任意值，建议形如 dueros_xxx）；技能ID（botId）在控制台基础信息页展示，用于设备变更主动同步。",
+        "data": {
+          "client_id": "Client_Id",
+          "client_secret": "ClientSecret",
+          "redirect_uri": "回调地址（小度平台生成，不可修改）",
+          "public_url": "公网访问地址（例如 https://ha.example.com:8663）",
+          "bot_id": "小度技能ID（botId，控制台基础信息页可见）"
+        }
+      },
+      "confirm": {
+        "title": "填写小度控制台",
+        "description": "请在小度技能的「配置服务」中填写：\n\n- 授权地址：{authorize_url}\n- Token地址：{token_url}\n- WebService：{webservice_url}\n- 回调地址：{callback_url}（平台已展示，无需修改）\n- Client_Id / ClientSecret：与上一步填写的一致\n\n填写完成后点击提交。"
+      },
+      "reconfigure": {
+        "title": "OAuth 配置",
+        "description": "Client_Id / ClientSecret 必须与小度控制台保持一致。\n\n- 授权地址：{authorize_url}\n- Token地址：{token_url}\n- WebService：{webservice_url}\n\n回调地址自动兼容小度正式环境（xiaodu.baidu.com）与调试环境（xiaodu-dbp.baidu.com），无需单独配置调试地址。",
+        "data": {
+          "client_id": "Client_Id",
+          "client_secret": "ClientSecret",
+          "redirect_uri": "回调地址（小度平台生成，不可修改）",
+          "public_url": "公网访问地址（例如 https://ha.example.com:8663）",
+          "bot_id": "小度技能ID（botId，控制台基础信息页可见）"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "设备与能力",
+        "description": "选择允许小度发现和控制的设备。列表带房间前缀便于筛选；每台设备可暴露多个单元（例如晾衣杆本体和晾衣杆灯），选中后可逐个配置同步的单元与能力。\n\n当前授权小度访问：{exposed_summary}\n可暴露设备数：{candidate_count}",
+        "data": {
+          "devices": "暴露给小度的设备",
+          "sync_areas": "同步 HA 房间到小度"
+        }
+      },
+      "device_select": {
+        "title": "配置能力",
+        "description": "还有 {remaining} 台设备需要配置。点击某台设备配置其能力，或选择「保持默认并完成」直接保存（全部能力启用）。\n\n{power_note}",
+        "data": {
+          "device": "选择要配置的设备"
+        }
+      },
+      "unit_select": {
+        "title": "同步单元",
+        "description": "配置「{device_name}」。\n\n{unit_hint}",
+        "data": {
+          "units": "要同步给小度的单元（可多选）"
+        }
+      },
+      "unit_caps": {
+        "title": "能力选择",
+        "description": "配置「{device_name} · {unit_name}」。\n\n{power_note}",
+        "data": {
+          "capabilities": "要启用的能力（可多选）"
+        }
+      }
+    }
+  }
+}
