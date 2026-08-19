@@ -20,7 +20,6 @@ from .const import (
     CONF_CAPABILITIES,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
-    CONF_DEVICE,
     CONF_DEVICES,
     CONF_SYNC_AREAS,
     CONF_PUBLIC_URL,
@@ -203,12 +202,11 @@ class XiaoduConfigFlow(ConfigFlow, domain=DOMAIN):
 class XiaoduOptionsFlow(OptionsFlow):
     """Handle Xiaodu options.
 
-    Interaction: pick devices first, then "click" each selected device to
-    choose which units (entities) to sync and their capabilities. The
-    default unit of a device keeps the device name; extra units (e.g. the
-    light on a 晾衣杆) are separate speaker appliances and default to off.
-    Choosing "keep defaults and finish" saves everything with the default
-    unit enabled (all its capabilities).
+    Collapsible structure (native menus): the first page is the top level —
+    a "中枢" section that expands into parallel speaker platforms (小度 now,
+    Tmall Genie later); each platform expands into the flat list of selected
+    devices; clicking a device opens its units (entities) and capabilities.
+    Devices that are not touched keep their saved settings.
     """
 
     # Optional capabilities the user can toggle. The mandatory ones (power,
@@ -233,15 +231,13 @@ class XiaoduOptionsFlow(OptionsFlow):
         "temperature",
         "humidity",
     )
-    _DONE = "__done__"
-
     def __init__(self) -> None:
         """Initialize the flow."""
         self._devices: dict[str, Any] = {}
         self._unit_config: dict[str, dict[str, list[str]]] = {}
-        self._pending: list[str] = []
         self._pending_units: list[tuple[str, str]] = []
         self._current: str | None = None
+        self._edited: set[str] = set()
         self._sync_areas = False
 
     def _candidate_devices(self) -> list[Any]:
@@ -271,18 +267,50 @@ class XiaoduOptionsFlow(OptionsFlow):
         return device.name
 
     @staticmethod
-    def _needs_config(device: Any) -> bool:
-        """A device needs a wizard step when it has toggles beyond defaults."""
-        return len(device.units) > 1 or any(
-            XiaoduOptionsFlow._selectable(unit) for unit in device.units
-        )
-
-    @staticmethod
     def _unit_label(device: Any, unit: Any) -> str:
         """Unit option label: default unit keeps the device name."""
         if unit.is_default:
             return f"{device.name}（默认）"
         return unit.name
+
+    def _device_option_label(self, device: Any) -> str:
+        """Row label: room + device name, marked new vs already configured."""
+        label = self._label(device)
+        saved = self.config_entry.options.get(CONF_DEVICES, {})
+        if device.device_key in saved or device.device_key in self._edited:
+            return f"{label}（已配置）"
+        return f"{label}（新增）"
+
+    def _bind_edit_step(self, step_id: str, device_key: str) -> None:
+        """Bind a per-device menu step that opens its unit/capability editor."""
+
+        async def _edit_step(
+            user_input: dict[str, Any] | None = None,
+        ) -> ConfigFlowResult:
+            self._current = device_key
+            return await self.async_step_unit_select()
+
+        setattr(self, f"async_step_{step_id}", _edit_step)
+
+    def _bind_group_step(self, step_id: str) -> None:
+        """Bind a platform menu step that opens that platform's device list."""
+
+        async def _step(
+            user_input: dict[str, Any] | None = None,
+        ) -> ConfigFlowResult:
+            return await self.async_step_group()
+
+        setattr(self, f"async_step_{step_id}", _step)
+
+    def _platform_entries(self) -> list[tuple[str, str]]:
+        """Parallel platform rows shown inside the 中枢 section.
+
+        Each platform gets its own menu step, so a future Tmall Genie / Xiaoai
+        platform simply appends a row here, sibling to 小度.
+        """
+        return [
+            ("group_xiaodu", f"小度（{len(self._devices)} 台设备）"),
+        ]
 
     def _current_units(self, device: Any) -> dict[str, Any]:
         """Return {entity_id: unit} of the currently exposed device (if any)."""
@@ -319,20 +347,95 @@ class XiaoduOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Select which devices Xiaodu may discover and control."""
+        """Top-level menu: the "中枢" section expands into the platforms."""
         candidates = self._candidate_devices()
         current = build_device_map(self.hass, self.config_entry.options)
         current_keys = {d.device_key for d in current.devices()}
+        saved = dict(self.config_entry.options.get(CONF_DEVICES, {}) or {})
 
+        if not self._devices:
+            # First visit: mirror the currently exposed devices so the
+            # expanded lists show what is already synced.
+            self._devices = {
+                d.device_key: d for d in candidates if d.device_key in current_keys
+            }
+            self._sync_areas = bool(
+                self.config_entry.options.get(CONF_SYNC_AREAS, False)
+            )
+            for key, device in self._devices.items():
+                if key in saved:
+                    self._unit_config[key] = saved[key]
+                else:
+                    default = device.default_unit
+                    if default is not None:
+                        self._unit_config[key] = {
+                            default.entity_id: self._selectable(default)
+                        }
+
+        if not candidates:
+            return self._save()
+
+        return self.async_show_menu(
+            step_id="init",
+            menu_options={
+                "platform": f"中枢（{len(self._devices)} 台设备）",
+                "manage": "添加 / 移除设备",
+                "save": "保存并完成",
+            },
+            description_placeholders={
+                "exposed_summary": summarize_devices(current),
+                "candidate_count": str(len(candidates)),
+            },
+        )
+
+    async def async_step_platform(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Expanded 中枢 section: one row per speaker platform."""
+        menu_options: dict[str, str] = {}
+        for step_id, label in self._platform_entries():
+            self._bind_group_step(step_id)
+            menu_options[step_id] = label
+        menu_options["init"] = "返回上一级"
+        return self.async_show_menu(
+            step_id="platform",
+            menu_options=menu_options,
+            description_placeholders={
+                "count": str(len(self._devices)),
+            },
+        )
+
+    async def async_step_group(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Expanded platform section: the flat list of selected devices."""
+        if not self._devices:
+            return await self.async_step_platform()
+
+        menu_options: dict[str, str] = {}
+        for index, key in enumerate(self._devices):
+            step_id = f"edit_{index}"
+            self._bind_edit_step(step_id, key)
+            menu_options[step_id] = self._device_option_label(self._devices[key])
+        menu_options["platform"] = "返回上一级"
+        return self.async_show_menu(
+            step_id="group",
+            menu_options=menu_options,
+            description_placeholders={
+                "count": str(len(self._devices)),
+            },
+        )
+
+    async def async_step_manage(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Select which devices Xiaodu may discover and control."""
+        candidates = self._candidate_devices()
+        saved = dict(self.config_entry.options.get(CONF_DEVICES, {}) or {})
         options = [
             selector.SelectOptionDict(value=d.device_key, label=self._label(d))
             for d in candidates
         ]
-
-        if not options:
-            return self.async_create_entry(
-                title="", data={CONF_DEVICES: {}, CONF_SYNC_AREAS: False}
-            )
 
         if user_input is not None:
             selected = set(user_input.get(CONF_DEVICES, []))
@@ -340,27 +443,33 @@ class XiaoduOptionsFlow(OptionsFlow):
             self._devices = {
                 d.device_key: d for d in candidates if d.device_key in selected
             }
-            self._unit_config = {}
-            self._pending = [
-                key
-                for key, device in self._devices.items()
-                if self._needs_config(device)
-            ]
-            if not self._devices:
-                return self._save()
-            return await self.async_step_device_select()
+            # Keep edits made earlier in this wizard; preserve saved configs;
+            # brand-new devices default to the default unit with all caps.
+            merged: dict[str, Any] = {}
+            for key, device in self._devices.items():
+                if key in self._unit_config:
+                    merged[key] = self._unit_config[key]
+                elif key in saved:
+                    merged[key] = saved[key]
+                else:
+                    default = device.default_unit
+                    if default is not None:
+                        merged[key] = {
+                            default.entity_id: self._selectable(default)
+                        }
+            self._unit_config = merged
+            return await self.async_step_init()
 
         return self.async_show_form(
-            step_id="init",
+            step_id="manage",
             description_placeholders={
-                "exposed_summary": summarize_devices(current),
                 "candidate_count": str(len(candidates)),
             },
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         CONF_DEVICES,
-                        default=sorted(current_keys),
+                        default=sorted(self._devices),
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=options,
@@ -369,53 +478,17 @@ class XiaoduOptionsFlow(OptionsFlow):
                     ),
                     vol.Optional(
                         CONF_SYNC_AREAS,
-                        default=bool(
-                            self.config_entry.options.get(CONF_SYNC_AREAS, False)
-                        ),
+                        default=self._sync_areas,
                     ): bool,
                 }
             ),
         )
 
-    async def async_step_device_select(
+    async def async_step_save(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick the next device whose capabilities to configure."""
-        if not self._pending:
-            return self._save()
-
-        if user_input is not None:
-            choice = user_input.get(CONF_DEVICE, "")
-            if choice in self._devices and choice in self._pending:
-                self._current = choice
-                return await self.async_step_unit_select()
-            return self._save()
-
-        options = [
-            selector.SelectOptionDict(
-                value=key, label=self._label(self._devices[key])
-            )
-            for key in self._pending
-        ]
-        options.append(
-            selector.SelectOptionDict(
-                value=self._DONE, label="保持默认并完成（跳过剩余设备）"
-            )
-        )
-        return self.async_show_form(
-            step_id="device_select",
-            description_placeholders={
-                "remaining": str(len(self._pending)),
-                "power_note": "必选能力（如开关）始终启用，不可取消；未配置的设备将默认启用默认单元的全部能力。",
-            },
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_DEVICE): selector.SelectSelector(
-                        selector.SelectSelectorConfig(options=options)
-                    )
-                }
-            ),
-        )
+        """Save the current configuration and finish."""
+        return self._save()
 
     async def async_step_unit_select(
         self, user_input: dict[str, Any] | None = None
@@ -426,8 +499,11 @@ class XiaoduOptionsFlow(OptionsFlow):
         current_units = self._current_units(device)
 
         if user_input is not None:
-            chosen = list(user_input.get(CONF_UNITS, []))
+            chosen = set(user_input.get(CONF_UNITS, []))
             config = self._unit_config.setdefault(self._current, {})
+            for entity_id in list(config):
+                if entity_id not in chosen:
+                    del config[entity_id]
             pending: list[tuple[str, str]] = []
             for entity_id in chosen:
                 unit = next(
@@ -440,14 +516,11 @@ class XiaoduOptionsFlow(OptionsFlow):
                 else:
                     config[entity_id] = []  # nothing to configure beyond power
             self._pending_units = pending
-            if self._current in self._pending:
-                self._pending.remove(self._current)
+            self._edited.add(self._current)
             self._current = None
             if self._pending_units:
                 return await self.async_step_unit_caps()
-            if self._pending:
-                return await self.async_step_device_select()
-            return self._save()
+            return await self.async_step_group()
 
         options = [
             selector.SelectOptionDict(
@@ -481,9 +554,7 @@ class XiaoduOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Choose the capabilities for one unit of the current device."""
         if not self._pending_units:
-            if self._pending:
-                return await self.async_step_device_select()
-            return self._save()
+            return await self.async_step_group()
 
         device_key, unit_entity_id = self._pending_units[0]
         device = self._devices[device_key]
@@ -502,9 +573,7 @@ class XiaoduOptionsFlow(OptionsFlow):
             self._pending_units.pop(0)
             if self._pending_units:
                 return await self.async_step_unit_caps()
-            if self._pending:
-                return await self.async_step_device_select()
-            return self._save()
+            return await self.async_step_group()
 
         if current_unit is not None:
             checked = {c for c in selectable if c in current_unit.enabled}

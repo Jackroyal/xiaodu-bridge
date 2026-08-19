@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DOMAIN = "xiaodu"
+DOMAIN = "ha_xiaodu"
 
 # Config entry data / options keys
 CONF_CLIENT_ID = "client_id"
@@ -22,6 +22,10 @@ DUEROS_SERVICE_PATH = "/api/xiaodu/service"
 # DuerOS notification interface: notify DuerOS that a user's device set changed.
 DUEROS_DEVICE_SYNC_URL = "https://xiaodu.baidu.com/saiya/smarthome/devicesync"
 
+# DuerOS notification interface: tell DuerOS that one device attribute changed;
+# DuerOS then sends ReportStateRequest back so the skill can return the value.
+DUEROS_CHANGE_REPORT_URL = "https://xiaodu.baidu.com/saiya/smarthome/changereport"
+
 # OAuth2 server defaults
 OAUTH_CODE_EXPIRE_SECONDS = 300
 # Access tokens are sent with every DuerOS request; refresh tokens last
@@ -31,6 +35,7 @@ OAUTH_REFRESH_TOKEN_EXPIRE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 # Runtime state keys (hass.data[DOMAIN])
 DATA_TIMER_MANAGER = "timed_services"
+DATA_STATE_REPORT_MANAGER = "state_report"
 
 # Capability-model device selection: device_key -> enabled caps.
 # Legacy entity include/exclude keys below are still read for migration.

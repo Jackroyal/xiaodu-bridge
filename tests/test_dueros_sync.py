@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-_XIAODU = ROOT / "custom_components" / "xiaodu"
+_XIAODU = ROOT / "custom_components" / "ha_xiaodu"
 
 import types  # noqa: E402
 

@@ -309,6 +309,32 @@ def test_query_generic_returns_attributes():
     assert any(a["name"] == "turnOnState" for a in result["payload"]["attributes"])
 
 
+def test_query_report_state_returns_attributes():
+    """DuerOS's ReportStateRequest (triggered by our changereport push) must
+    be answered with the current full attribute set."""
+    result = run(
+        handle_request(
+            _hass(),
+            _device_map(_hass(), ["light.living"]),
+            _request(
+                NAMESPACE_QUERY,
+                "ReportStateRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {
+                        "applianceId": "light.living",
+                        "attributeName": "brightness",
+                    },
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "ReportStateResponse"
+    assert result["header"]["namespace"] == NAMESPACE_QUERY
+    assert any(a["name"] == "brightness" for a in result["payload"]["attributes"])
+    assert any(a["name"] == "turnOnState" for a in result["payload"]["attributes"])
+
+
 def test_unknown_namespace():
     result = run(
         handle_request(
@@ -807,6 +833,35 @@ def test_query_routes_to_sibling_entity():
     assert humidity["value"] == 50
 
 
+def test_query_report_state_aggregates_sibling_attributes():
+    """ReportStateRequest on a 温湿度计 must answer with the aggregated
+    attribute set (humidity from the requested unit + temperature from its
+    sibling), because our changereport push asks DuerOS to re-query."""
+    hass = _temp_humidity_hass()
+    devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_QUERY,
+                "ReportStateRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {
+                        "applianceId": "sensor.h",
+                        "attributeName": "humidity",
+                    },
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "ReportStateResponse"
+    names = {a["name"] for a in result["payload"]["attributes"]}
+    assert "humidity" in names
+    assert "temperature" in names
+
+
 def test_query_temperature_requires_enabled_capability():
     hass = _temp_humidity_hass()
     devices = _sensor_device_map(hass, {"sensor-dev": ["humidity"]})
@@ -1284,7 +1339,7 @@ def test_control_yuba_set_temperature_maps_to_number():
 def test_control_timing_turn_off_schedules_persisted_call():
     hass = _hass()
     manager = FakeTimedManager()
-    hass.data["xiaodu"] = {"timed_services": manager}
+    hass.data["ha_xiaodu"] = {"timed_services": manager}
     now = time.time()
     result = run(
         handle_request(
@@ -1311,7 +1366,7 @@ def test_control_timing_turn_off_schedules_persisted_call():
 def test_control_timing_turn_on_schedules_persisted_call():
     hass = _hass()
     manager = FakeTimedManager()
-    hass.data["xiaodu"] = {"timed_services": manager}
+    hass.data["ha_xiaodu"] = {"timed_services": manager}
     now = time.time()
     result = run(
         handle_request(
@@ -1337,7 +1392,7 @@ def test_control_timing_turn_on_schedules_persisted_call():
 def test_control_timing_rejects_invalid_timestamp():
     hass = _hass()
     manager = FakeTimedManager()
-    hass.data["xiaodu"] = {"timed_services": manager}
+    hass.data["ha_xiaodu"] = {"timed_services": manager}
     result = run(
         handle_request(
             hass,

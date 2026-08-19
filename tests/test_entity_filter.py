@@ -12,7 +12,7 @@ from pathlib import Path
 _ENTITY_FILTER_PATH = (
     Path(__file__).resolve().parents[1]
     / "custom_components"
-    / "xiaodu"
+    / "ha_xiaodu"
     / "entity_filter.py"
 )
 

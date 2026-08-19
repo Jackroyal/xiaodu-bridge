@@ -17,7 +17,7 @@
           "client_id": "Client_Id",
           "client_secret": "ClientSecret",
           "redirect_uri": "回调地址（小度平台生成，不可修改）",
-          "public_url": "公网访问地址（例如 https://ha.example.com:8663）",
+          "public_url": "公网访问地址（例如 https://ha.example.com:8123）",
           "bot_id": "小度技能ID（botId，控制台基础信息页可见）"
         }
       },
@@ -32,7 +32,7 @@
           "client_id": "Client_Id",
           "client_secret": "ClientSecret",
           "redirect_uri": "回调地址（小度平台生成，不可修改）",
-          "public_url": "公网访问地址（例如 https://ha.example.com:8663）",
+          "public_url": "公网访问地址（例如 https://ha.example.com:8123）",
           "bot_id": "小度技能ID（botId，控制台基础信息页可见）"
         }
       }
@@ -42,17 +42,24 @@
     "step": {
       "init": {
         "title": "设备与能力",
-        "description": "选择允许小度发现和控制的设备。列表带房间前缀便于筛选；每台设备可暴露多个单元（例如晾衣杆本体和晾衣杆灯），选中后可逐个配置同步的单元与能力。\n\n当前授权小度访问：{exposed_summary}\n可暴露设备数：{candidate_count}",
+        "description": "点击「中枢」展开平台列表（小度，后续可并列天猫精灵等），再点击平台查看并编辑其同步设备。\n\n当前授权小度访问：{exposed_summary}\n可暴露设备数：{candidate_count}"
+      },
+      "platform": {
+        "title": "中枢",
+        "description": "点击平台展开其同步设备的平铺列表。",
+        "data": {}
+      },
+      "group": {
+        "title": "小度",
+        "description": "已同步 {count} 台设备。点击设备可编辑其同步单元与能力。",
+        "data": {}
+      },
+      "manage": {
+        "title": "管理设备",
+        "description": "选择允许小度发现和控制的设备。列表带房间前缀便于筛选。",
         "data": {
           "devices": "暴露给小度的设备",
           "sync_areas": "同步 HA 房间到小度"
-        }
-      },
-      "device_select": {
-        "title": "配置能力",
-        "description": "还有 {remaining} 台设备需要配置。点击某台设备配置其能力，或选择「保持默认并完成」直接保存（全部能力启用）。\n\n{power_note}",
-        "data": {
-          "device": "选择要配置的设备"
         }
       },
       "unit_select": {

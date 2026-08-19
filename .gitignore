@@ -16,3 +16,10 @@ outputs/
 *.log
 .env
 .env.*
+
+# IDE
+.idea/
+
+# Local agent workflow docs (not published)
+AGENTS.md
+COMMITTING.md

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from ..devices import XiaoduDeviceMap, XiaoduUnit
 
-from ..const import DATA_TIMER_MANAGER, DOMAIN
+from ..const import DATA_STATE_REPORT_MANAGER, DATA_TIMER_MANAGER, DOMAIN
 from ..devices import (
     CAP_BRIGHTNESS,
     CAP_CHANNEL,
@@ -162,7 +162,7 @@ def _dueros_actions(unit: XiaoduUnit) -> list[str]:
     ]
 
 
-def _filtered_attributes(
+def filtered_attributes(
     unit: XiaoduUnit, adapter: Any, state: Any
 ) -> list[dict[str, Any]]:
     """Return the attributes belonging to the unit's enabled capabilities.
@@ -257,7 +257,7 @@ def _discovery(
                 appliance["applianceTypes"] = [APPLIANCE_YUBA]
             elif unit.device_class == DEVICE_CLASS_SOCKET:
                 appliance["applianceTypes"] = [APPLIANCE_SOCKET]
-            attributes = _filtered_attributes(unit, adapter, state)
+            attributes = filtered_attributes(unit, adapter, state)
             # Aggregate read-only attributes from sibling entities onto the
             # default unit (e.g. the humidity entity of a 温湿度计 whose
             # default unit is temperature).
@@ -271,7 +271,7 @@ def _discovery(
                 if sibling_adapter is None:
                     continue
                 attributes.extend(
-                    _filtered_attributes(unit, sibling_adapter, sibling_state)
+                    filtered_attributes(unit, sibling_adapter, sibling_state)
                 )
             # Device-level structural attributes (YUBA mode / target temp).
             attributes.extend(_filter_attribute_list(unit, extra_attributes(hass, unit, device)))
@@ -326,6 +326,13 @@ async def _control(
     if call is None:
         return _error_response(header, ERROR_UNSUPPORTED)
 
+    # The confirmation below already carries the fresh attributes back to
+    # DuerOS; suppress the redundant changereport for this unit so a voice
+    # command does not trigger an extra ReportState round trip.
+    report_manager = hass.data.get(DOMAIN, {}).get(DATA_STATE_REPORT_MANAGER)
+    if report_manager is not None:
+        report_manager.mark_confirmed(entity_id)
+
     calls = call if isinstance(call, list) else [call]
     for domain, service, data in calls:
         # ``data`` may carry an explicit entity_id to target a sibling entity
@@ -338,7 +345,7 @@ async def _control(
             return _error_response(header, ERROR_SERVICE)
 
     updated = hass.states.get(entity_id)
-    attributes = _filtered_attributes(unit, adapter, updated) if updated else []
+    attributes = filtered_attributes(unit, adapter, updated) if updated else []
     attributes.extend(_filter_attribute_list(unit, extra_attributes(hass, unit, device)))
     return _respond(
         header,
@@ -428,7 +435,23 @@ def _query(
     if adapter is None:
         return _error_response(header, ERROR_UNSUPPORTED)
 
-    attributes = _filtered_attributes(unit, adapter, state)
+    attributes = filtered_attributes(unit, adapter, state)
+    # Aggregate read-only attributes from sibling entities onto the requested
+    # unit (e.g. the humidity entity of a 温湿度计 whose default unit is
+    # temperature) so ReportStateRequest / generic queries answer with the
+    # full attribute set, exactly like discovery does.
+    seen_entities = {target_entity}
+    for capability, sibling_entity in unit.query_entities.items():
+        if capability not in unit.enabled or sibling_entity in seen_entities:
+            continue
+        seen_entities.add(sibling_entity)
+        sibling_state = hass.states.get(sibling_entity)
+        if sibling_state is None:
+            continue
+        sibling_adapter = get_adapter(sibling_state.domain)
+        if sibling_adapter is None:
+            continue
+        attributes.extend(filtered_attributes(unit, sibling_adapter, sibling_state))
     device = devices.device_for_entity(entity_id)
     attributes.extend(_filter_attribute_list(unit, extra_attributes(hass, unit, device)))
 
