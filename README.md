@@ -2,7 +2,7 @@
 
 项目仓库：<https://github.com/Jackroyal/ha-xiaodu>
 
-小度智能家居自定义集成（当前版本 **v0.7.7**）：让 Home Assistant 中的设备可以被
+小度智能家居自定义集成（当前版本 **v0.7.8**）：让 Home Assistant 中的设备可以被
 小度音箱 / 小度 App 发现、查询与控制。架构为「小度当 OAuth 客户端、本集成当授权
 服务器」：集成通过 `/api/xiaodu`、`/api/xiaodu/service` 接收小度智能家居请求，
 把 HA 实体映射为小度设备/能力，并签发仅限本集成的私有不透明 token（最小权限，
@@ -11,6 +11,13 @@ token 无法用于 HA API）。
 > **v0.7.7 兼容性修复**：适配 HA 2026.8+ 设备注册表中 HomeKit 桥设备的三元组
 > 标识符 `(domain, object_id, key)`，避免 `_sync_device_registry` 解包
 > `device.identifiers` 时抛 `ValueError: too many values to unpack` 导致集成启动失败。
+
+> **v0.7.8 设备去重**：已同步设备在设备注册表中的镜像条目统一标记为
+> `disabled_by=DeviceEntryDisabler.INTEGRATION`。HA 2026.8 的设备页默认隐藏已禁用
+> 设备，因此同一台设备不会再在 **设置 → 设备** 列表里和 Xiaomi Home 等真实集成
+> 重复出现；设备仍保留在注册表中，集成页「小度中枢」的折叠展开、设备计数、
+> 「移除设备」入口及「单元与能力」菜单均不受影响（需核对时在设备页勾选
+> 「已禁用」筛选即可查看这些镜像）。
 
 ## 功能现状
 
@@ -41,7 +48,8 @@ token 无法用于 HA API）。
   「单元与能力」单设备编辑入口（由前端模块注入核心组件菜单实现，非官方扩展口，
   详见 `www/` 文件头注释；若失效仍可通过「设备与能力」选项流程编辑）与官方
   「移除设备」（取消该设备同步，走 HA 官方 `async_remove_config_entry_device`
-  钩子）、“禁用设备”项。
+  钩子）、“禁用设备”项。这些同步镜像设备以「集成禁用」状态注册，默认不出现在
+  设备列表，避免与设备真实集成（如 Xiaomi Home）重复。
 
 ## 目录结构
 

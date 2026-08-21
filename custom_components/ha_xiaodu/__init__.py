@@ -343,6 +343,13 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     device-registry entries. Mirroring ``options[CONF_DEVICES]`` into the
     registry makes the row fold open to exactly the devices Xiaodu may
     discover and control.
+
+    这些镜像设备一律带 ``disabled_by=DeviceEntryDisabler.INTEGRATION``：
+    HA 2026.8 的设备页默认过滤已禁用设备，因此同一台设备不会在「设置 →
+    设备」列表里和 Xiaomi Home 的真实设备重复出现；但设备仍保留在注册表
+    中，集成页的折叠展开、设备计数、「移除设备」入口与注入的「单元与能力」
+    菜单全部照常工作（行会按禁用态置灰显示）。需要核对时在设备页勾选
+    「已禁用」筛选即可看到这些镜像。
     """
     registry = dr.async_get(hass)
     devices_config = entry.options.get(CONF_DEVICES) or {}
@@ -382,6 +389,7 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 name=name,
                 manufacturer=DEVICE_MANUFACTURER,
                 model=DEVICE_MODEL,
+                disabled_by=dr.DeviceEntryDisabler.INTEGRATION,
             )
         updates: dict[str, object] = {}
         if device.name != name:
@@ -390,6 +398,9 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             updates["area_id"] = wanted_areas[device_key]
         if device.config_entry_id != entry.entry_id:
             updates["new_config_entry_id"] = entry.entry_id
+        if device.disabled_by != dr.DeviceEntryDisabler.INTEGRATION:
+            # 迁移旧版本创建的无禁用标记镜像，避免它们重新出现在设备列表。
+            updates["disabled_by"] = dr.DeviceEntryDisabler.INTEGRATION
         if updates:
             registry.async_update_device(device.id, **updates)
 

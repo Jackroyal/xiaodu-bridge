@@ -44,7 +44,7 @@ async def test_setup_and_unload(hass: HomeAssistant) -> None:
 
 
 async def test_sync_device_registry(hass: HomeAssistant) -> None:
-    """Exposed devices are mirrored into the device registry."""
+    """Exposed devices are mirrored as integration-disabled registry entries."""
     device_registry = dr.async_get(hass)
     underlying_entry = MockConfigEntry(domain="test", data={}, title="测试")
     underlying_entry.add_to_hass(hass)
@@ -71,7 +71,19 @@ async def test_sync_device_registry(hass: HomeAssistant) -> None:
     synced = device_registry.async_get_device(identifiers={(DOMAIN, underlying.id)})
     assert synced is not None
     assert synced.name == "次卧灯"
+    assert synced.disabled_by == dr.DeviceEntryDisabler.INTEGRATION
     assert entry.entry_id in synced.config_entries
+
+    # Migration: mirrors created before the disabled-by change are updated too.
+    device_registry.async_update_device(synced.id, disabled_by=None)
+    assert (
+        device_registry.async_get(synced.id).disabled_by is None
+    )
+    _sync_device_registry(hass, entry)
+    assert (
+        device_registry.async_get(synced.id).disabled_by
+        == dr.DeviceEntryDisabler.INTEGRATION
+    )
 
     # Deselecting the device removes it from the registry again.
     hass.config_entries.async_update_entry(entry, options={CONF_DEVICES: {}})
@@ -105,6 +117,7 @@ async def test_remove_config_entry_device(hass: HomeAssistant) -> None:
 
     synced = device_registry.async_get_device(identifiers={(DOMAIN, underlying.id)})
     assert synced is not None
+    assert synced.disabled_by == dr.DeviceEntryDisabler.INTEGRATION
     assert await async_remove_config_entry_device(hass, entry, synced)
     assert entry.options.get(CONF_DEVICES) == {}
     assert (
