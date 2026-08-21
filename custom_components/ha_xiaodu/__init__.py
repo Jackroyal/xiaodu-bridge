@@ -282,9 +282,9 @@ async def async_remove_config_entry_device(
     """
     device_key = next(
         (
-            value
-            for domain, value in device_entry.identifiers
-            if domain == DOMAIN
+            ids[1]
+            for ids in device_entry.identifiers
+            if ids[0] == DOMAIN
         ),
         None,
     )
@@ -364,7 +364,7 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # Drop registry devices we own that are no longer exposed.
     for device in list(registry.devices.values()):
         device_key = next(
-            (value for domain, value in device.identifiers if domain == DOMAIN),
+            (ids[1] for ids in device.identifiers if ids[0] == DOMAIN),
             None,
         )
         if device_key is None or device_key in wanted:

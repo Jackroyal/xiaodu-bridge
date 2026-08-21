@@ -2,11 +2,15 @@
 
 项目仓库：<https://github.com/Jackroyal/ha-xiaodu>
 
-小度智能家居自定义集成（当前版本 **v0.7.6**）：让 Home Assistant 中的设备可以被
+小度智能家居自定义集成（当前版本 **v0.7.7**）：让 Home Assistant 中的设备可以被
 小度音箱 / 小度 App 发现、查询与控制。架构为「小度当 OAuth 客户端、本集成当授权
 服务器」：集成通过 `/api/xiaodu`、`/api/xiaodu/service` 接收小度智能家居请求，
 把 HA 实体映射为小度设备/能力，并签发仅限本集成的私有不透明 token（最小权限，
 token 无法用于 HA API）。
+
+> **v0.7.7 兼容性修复**：适配 HA 2026.8+ 设备注册表中 HomeKit 桥设备的三元组
+> 标识符 `(domain, object_id, key)`，避免 `_sync_device_registry` 解包
+> `device.identifiers` 时抛 `ValueError: too many values to unpack` 导致集成启动失败。
 
 ## 功能现状
 
