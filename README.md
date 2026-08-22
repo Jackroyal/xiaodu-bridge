@@ -1,4 +1,4 @@
-# Home Assistant Custom Integration: Xiaodu (DuerOS)
+# Home Assistant Custom Integration: Xiaodu
 
 项目仓库：<https://github.com/Jackroyal/ha-xiaodu>
 
@@ -10,7 +10,7 @@
 
 本项目按 HACS Custom Integration 规范组织。将仓库加入 HACS 的自定义仓库后，类别选择 **Integration**，即可安装。
 
-安装后重启 Home Assistant，在 **设置 → 设备与服务 → 添加集成** 中搜索 **Xiaodu (DuerOS)**。
+安装后重启 Home Assistant，在 **设置 → 设备与服务 → 添加集成** 中搜索 **Xiaodu**。
 
 > 正式提交 HACS Default 后，用户无需再手动添加自定义仓库。
 
