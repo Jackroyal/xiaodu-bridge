@@ -1,6 +1,6 @@
 {
   "domain": "ha_xiaodu",
-  "name": "Xiaodu (DuerOS)",
+  "name": "Xiaodu",
   "codeowners": ["@Jackroyal"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "websocket_api"],
