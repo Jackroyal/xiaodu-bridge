@@ -2,35 +2,30 @@
 
 This is a hub integration without entity platforms: it serves the OAuth2
 endpoints and the DuerOS smart-home WebService. The HTTP views are registered
-once per setup; all runtime state (OAuth tokens, device map) is resolved
-per-request from the config entry. Pending DuerOS timing requests are loaded
-from storage at setup and re-armed with HA's event-loop scheduler.
+once per setup; all runtime state (OAuth tokens, enhanced device set) is
+resolved per-request from the config entry. Pending DuerOS timing requests are
+loaded from storage at setup and re-armed with HA's event-loop scheduler.
+
+The runtime model is the DuerOS *semantic* model (``dueros`` package): every
+exposable device is surfaced as one or more ``DuerDevice`` appliances. The
+legacy per-entity (unit) path is no longer used.
 """
 
 from __future__ import annotations
 
 import logging
 
-import voluptuous as vol
-
-from homeassistant.components import websocket_api
-from homeassistant.components.frontend import (
-    DATA_EXTRA_MODULE_URL,
-    add_extra_js_url,
-)
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_START
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_DEVICES,
+    DATA_ENHANCED_DEVICES,
     DATA_STATE_REPORT_MANAGER,
     DATA_TIMER_MANAGER,
     DOMAIN,
 )
-from .devices import build_device_map, implied_capabilities
 from .oauth_server import (
     DATA_VIEWS_REGISTERED,
     XiaoduDuerOSServiceView,
@@ -43,223 +38,25 @@ from .timers import TimedServiceManager
 
 _LOGGER = logging.getLogger(__name__)
 
-# Title shown on the integration page for this hub entry; the 设备与服务 page
-# uses it as the row headline (falls back to the domain name when empty).
+# Title shown on the integration page for this hub entry.
 ENTRY_TITLE = "小度中枢"
 DEVICE_MANUFACTURER = "DuerOS"
 DEVICE_MODEL = "小度智能中枢"
 
-# 「设备与服务」页设备行菜单的「单元与能力」入口来自前端模块
-# ha-xiaodu-device-config.js（注入式，见该文件头部注释）。
-# 说明：frontend.add_extra_js_url 是官方注册前端模块的 API（HACS 同样
-# 用它注入 iconset），但往核心组件 ha-config-entry-device-row 的菜单里
-# 追加自定义项属于非官方用法：HA 大版本升级可能让该入口失效（已做
-# 兜底，最坏情况只是菜单项不显示）。官方替代方案为「设备与能力」选项
-# 流程或自定义配置面板（config_panel_domain），本集成暂保留注入方案。
-FRONTEND_MODULE_URL = "/ha_xiaodu/www/ha-xiaodu-device-config.js"
-
-# Optional capabilities offered in the per-device unit/capability editor.
-# Mandatory capabilities (power, cover pause, YUBA modes / target temperature)
-# are force-kept by ``implied_capabilities`` and never shown as toggles.
-SELECTABLE_CAPS = (
-    "brightness",
-    "colorTemperature",
-    "color",
-    "volume",
-    "channel",
-    "mute",
-    "fanSpeed",
-    "targetTemperature",
-    "targetHumidity",
-    "mode",
-    "suction",
-    "continue",
-    "temperature",
-    "humidity",
-)
-
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register frontend assets and the per-device editor API.
+    """Set up the hub (no entity platforms, no device-menu injection).
 
-    这里的静态路径、WS 命令都是官方机制；唯一带注入性质的是前端模块里
-    对设备行菜单的 DOM 追加（见 www/ha-xiaodu-device-config.js 注释）。
+    The per-device "单元与能力" frontend module and its WebSocket commands are
+    obsolete: device → capability configuration is handled by the options flow.
     """
-    await hass.http.async_register_static_paths(
-        [
-            StaticPathConfig(
-                "/ha_xiaodu/www",
-                hass.config.path("custom_components", DOMAIN, "www"),
-                cache_headers=False,
-            )
-        ]
-    )
-    _ensure_frontend_module(hass)
-    # 配置条目在启动早期就会被设置，而 frontend 组件要到更晚才初始化
-    # DATA_EXTRA_MODULE_URL；首次注册往往落在空窗期，所以挂一个
-    # EVENT_HOMEASSISTANT_START 兜底，等所有组件就绪后再补注册。
-    # 该监听在 async_setup_entry 里也会再调一次 _ensure_frontend_module，
-    # 幂等，不会重复添加。
-    hass.bus.async_listen_once(
-        EVENT_HOMEASSISTANT_START,
-        lambda _event: _ensure_frontend_module(hass),
-    )
-    websocket_api.async_register_command(hass, ws_device_config)
-    websocket_api.async_register_command(hass, ws_set_device_config)
     return True
-
-
-def _ensure_frontend_module(hass: HomeAssistant) -> None:
-    """Register the device-menu module with the frontend (idempotent).
-
-    add_extra_js_url 只是往 frontend 的模块集合里加 URL，页面每次加载时
-    都会重新渲染该集合，因此运行期注册即可生效，无需重启。
-    """
-    try:
-        manager = hass.data.get(DATA_EXTRA_MODULE_URL)
-        if manager is not None and FRONTEND_MODULE_URL not in manager.urls:
-            add_extra_js_url(hass, FRONTEND_MODULE_URL)
-            _LOGGER.debug("Registered frontend module %s", FRONTEND_MODULE_URL)
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("Failed to register frontend module %s", FRONTEND_MODULE_URL)
 
 
 def _get_entry(hass: HomeAssistant) -> ConfigEntry | None:
     """Return the single Xiaodu hub entry, if configured."""
     entries = hass.config_entries.async_entries(DOMAIN)
     return entries[0] if entries else None
-
-
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): "ha_xiaodu/device_config",
-        vol.Required("device_key"): str,
-    }
-)
-@websocket_api.async_response
-async def ws_device_config(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-) -> None:
-    """Return the unit/capability model of one exposed device."""
-    entry = _get_entry(hass)
-    if entry is None:
-        connection.send_error(
-            msg["id"], websocket_api.ERR_NOT_FOUND, "No config entry"
-        )
-        return
-
-    candidates = build_device_map(hass, {})
-    device = candidates.device(msg["device_key"])
-    if device is None:
-        connection.send_error(
-            msg["id"], websocket_api.ERR_NOT_FOUND, "Device not found"
-        )
-        return
-
-    current = build_device_map(hass, entry.options)
-    current_device = current.device(msg["device_key"])
-    current_units = (
-        {unit.entity_id: unit for unit in current_device.units}
-        if current_device is not None
-        else {}
-    )
-
-    units = []
-    for unit in device.units:
-        enabled = unit.entity_id in current_units
-        required = set(
-            implied_capabilities(
-                domain=unit.entity_id.split(".", 1)[0],
-                device_class=unit.device_class,
-                is_default=unit.is_default,
-            )
-        ) & set(unit.capabilities)
-        units.append(
-            {
-                "entity_id": unit.entity_id,
-                "name": unit.name,
-                "is_default": unit.is_default,
-                "capabilities": sorted(unit.capabilities),
-                "selectable": [
-                    capability
-                    for capability in SELECTABLE_CAPS
-                    if capability in unit.capabilities
-                ],
-                "required": sorted(required),
-                "enabled": enabled,
-                "enabled_capabilities": (
-                    sorted(current_units[unit.entity_id].enabled) if enabled else []
-                ),
-            }
-        )
-
-    connection.send_result(
-        msg["id"],
-        {
-            "device": {
-                "name": device.name,
-                "area_name": device.area_name,
-                "units": units,
-            }
-        },
-    )
-
-
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): "ha_xiaodu/set_device_config",
-        vol.Required("device_key"): str,
-        vol.Required("units"): {str: [str]},
-    }
-)
-@websocket_api.require_admin
-@websocket_api.async_response
-async def ws_set_device_config(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-) -> None:
-    """Update the units/capabilities exposed for one device."""
-    entry = _get_entry(hass)
-    if entry is None:
-        connection.send_error(
-            msg["id"], websocket_api.ERR_NOT_FOUND, "No config entry"
-        )
-        return
-
-    candidates = build_device_map(hass, {})
-    device = candidates.device(msg["device_key"])
-    if device is None:
-        connection.send_error(
-            msg["id"], websocket_api.ERR_NOT_FOUND, "Device not found"
-        )
-        return
-
-    unit_by_entity = {unit.entity_id: unit for unit in device.units}
-    cleaned: dict[str, list[str]] = {}
-    for entity_id, capabilities in msg["units"].items():
-        unit = unit_by_entity.get(entity_id)
-        if unit is None:
-            continue
-        valid = {c for c in capabilities if c in unit.capabilities}
-        valid |= set(
-            implied_capabilities(
-                domain=entity_id.split(".", 1)[0],
-                device_class=unit.device_class,
-                is_default=unit.is_default,
-            )
-        ) & set(unit.capabilities)
-        cleaned[entity_id] = sorted(valid)
-
-    options = dict(entry.options)
-    devices = dict(options.get(CONF_DEVICES) or {})
-    if cleaned:
-        devices[msg["device_key"]] = cleaned
-    else:
-        devices.pop(msg["device_key"], None)
-    options[CONF_DEVICES] = devices
-
-    hass.config_entries.async_update_entry(entry, options=options)
-    await hass.config_entries.async_reload(entry.entry_id)
-    connection.send_result(msg["id"], {})
 
 
 async def async_remove_config_entry_device(
@@ -303,12 +100,16 @@ async def async_remove_config_entry_device(
     return True
 
 
+
+
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Xiaodu from a config entry."""
     data = hass.data.setdefault(DOMAIN, {})
-    # Belt-and-suspenders: the page module must be registered even if the
-    # component-level setup ran before the frontend was ready.
-    _ensure_frontend_module(hass)
+    # The device-center (semantic) device set is built lazily by the DuerOS
+    # WebService on the first request (see dueros.protocol._get_enhanced) and
+    # cached in ``hass.data``, so it always reflects devices loaded at that time.
     # Give the hub entry a readable headline on the integrations page.
     if not entry.title or entry.title == "Xiaodu":
         hass.config_entries.async_update_entry(entry, title=ENTRY_TITLE)
@@ -326,13 +127,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data[DATA_TIMER_MANAGER] = TimedServiceManager(hass)
     await data[DATA_TIMER_MANAGER].async_load()
 
-    # Active state reporting: push changereports when exposed entities change
-    # outside the speaker, so DuerOS keeps its attribute values fresh.
     manager = StateReportManager(hass, entry)
     data[DATA_STATE_REPORT_MANAGER] = manager
     manager.async_start()
     manager.update_unsub = entry.add_update_listener(_async_update_listener)
     return True
+
 
 
 def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -406,7 +206,10 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Rebuild the state-report index when the entry's options/data change."""
+    """Rebuild the device set + state-report index on options/data change."""
+    from .dueros.enhanced import build_enhanced_for_hass  # noqa: PLC0415
+
+    hass.data.setdefault(DOMAIN, {})[DATA_ENHANCED_DEVICES] = build_enhanced_for_hass(hass, entry)
     _sync_device_registry(hass, entry)
     manager = hass.data.get(DOMAIN, {}).get(DATA_STATE_REPORT_MANAGER)
     if manager is not None:

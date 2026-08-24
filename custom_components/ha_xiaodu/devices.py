@@ -104,6 +104,16 @@ CAP_LABELS = {
     CAP_CONTINUE: "继续",
     CAP_TEMPERATURE: "温度",
     CAP_HUMIDITY: "湿度",
+    # Device-profile capabilities (device-center semantic model).
+    "warmthLevel": "暖风档位",
+    "electricityCapacity": "电量",
+    "workState": "运行状态",
+    "timeLeft": "剩余时间",
+    "targetHumidity": "目标湿度",
+    "waterLevel": "水位",
+    "percentage": "位置",
+    "pause": "暂停",
+    "continue": "继续",
 }
 
 # Device-class classification (platform-agnostic, see ``classify_device``).
@@ -172,6 +182,8 @@ _AUXILIARY_MARKERS = (
     "buzzer",
     "fault",
     "is_on",  # Mi Home generates ``*_is_on`` power-state switches on TVs / heaters
+    "night_light",  # 夜灯 config switches are not independent speaker appliances
+    "night",
 )
 
 # Chinese friendly-name keywords for the same kind of status/safety entities

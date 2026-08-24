@@ -53,8 +53,45 @@ def load_dueros() -> tuple:
     pkg.__path__ = [str(_XIAODU / "dueros")]
     sys.modules["xiaodu.dueros"] = pkg
 
-    _load_module("xiaodu.dueros.constants", _XIAODU / "dueros" / "constants.py")
+    for mod in ("constants", "model", "composers", "registry", "profiles", "defaults", "enhanced"):
+        _load_module(f"xiaodu.dueros.{mod}", _XIAODU / "dueros" / f"{mod}.py")
     _load_module("xiaodu.dueros.adapters", _XIAODU / "dueros" / "adapters.py")
     protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
 
     return protocol.handle_request, sys.modules["xiaodu.entity_filter"].EntityFilter, protocol
+
+
+def load_semantic_model() -> types.ModuleType:
+    """Load the long-term semantic model (model / composers / registry) standalone.
+
+    These modules only import HA under TYPE_CHECKING, so they can be loaded
+    without a Home Assistant runtime; reloading a fresh ``xiaodu.dueros``
+    package keeps the registry isolated per test.
+    """
+    _load_parent()
+
+    pkg = types.ModuleType("xiaodu.dueros")
+    pkg.__path__ = [str(_XIAODU / "dueros")]
+    sys.modules["xiaodu.dueros"] = pkg
+
+    _load_module("xiaodu.dueros.constants", _XIAODU / "dueros" / "constants.py")
+    _load_module("xiaodu.dueros.model", _XIAODU / "dueros" / "model.py")
+    _load_module("xiaodu.dueros.composers", _XIAODU / "dueros" / "composers.py")
+    _load_module("xiaodu.dueros.registry", _XIAODU / "dueros" / "registry.py")
+    _load_module("xiaodu.dueros.profiles", _XIAODU / "dueros" / "profiles.py")
+    _load_module("xiaodu.dueros.defaults", _XIAODU / "dueros" / "defaults.py")
+
+    return sys.modules["xiaodu.dueros.registry"]
+
+
+def load_enhanced() -> tuple:
+    """Return (protocol_module, enhanced_module) with the semantic stack loaded."""
+    _load_parent()
+    pkg = types.ModuleType("xiaodu.dueros")
+    pkg.__path__ = [str(_XIAODU / "dueros")]
+    sys.modules["xiaodu.dueros"] = pkg
+    for mod in ("constants", "model", "composers", "registry", "profiles", "defaults", "enhanced"):
+        _load_module(f"xiaodu.dueros.{mod}", _XIAODU / "dueros" / f"{mod}.py")
+    _load_module("xiaodu.dueros.adapters", _XIAODU / "dueros" / "adapters.py")
+    protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
+    return protocol, sys.modules["xiaodu.dueros.enhanced"]

@@ -2,7 +2,7 @@
 
 项目仓库：<https://github.com/Jackroyal/ha-xiaodu>
 
-小度智能家居自定义集成（当前版本 **v0.7.8**）：让 Home Assistant 中的设备可以被
+小度智能家居自定义集成（当前版本 **v0.9.0**）：让 Home Assistant 中的设备可以被
 小度音箱 / 小度 App 发现、查询与控制。架构为「小度当 OAuth 客户端、本集成当授权
 服务器」：集成通过 `/api/xiaodu`、`/api/xiaodu/service` 接收小度智能家居请求，
 把 HA 实体映射为小度设备/能力，并签发仅限本集成的私有不透明 token（最小权限，
@@ -15,10 +15,10 @@ token 无法用于 HA API）。
 > **v0.7.8 设备去重**：已同步设备在设备注册表中的镜像条目统一标记为
 > `disabled_by=DeviceEntryDisabler.INTEGRATION`。HA 2026.8 的设备页默认隐藏已禁用
 > 设备，因此同一台设备不会再在 **设置 → 设备** 列表里和 Xiaomi Home 等真实集成
-> 重复出现；设备仍保留在注册表中，集成页「小度中枢」的折叠展开、设备计数、
-> 「移除设备」入口及「单元与能力」菜单均不受影响（需核对时在设备页勾选
-> 「已禁用」筛选即可查看这些镜像）。
+> 重复出现；设备仍保留在注册表中，集成页「小度中枢」的折叠展开、设备计数与
+> 「移除设备」入口均不受影响（需核对时在设备页勾选「已禁用」筛选即可查看这些镜像）。
 
+- **设备中枢语义模型**：设备一旦匹配档案（浴霸/晾衣杆/扫地机/洗衣机），自动用「DuerOS 语义」暴露为单台设备（如浴霸=取暖/吹风/换气/照明模式、暖风档位 setGear、风速 setFanSpeed），不再拆成散乱开关；其余设备（灯/开关/风扇/空调/窗帘/媒体播放器/温湿度计/插座等）也统一走语义模型（由通用合成器按能力构建 DuerOS 设备），不再有旧的逐实体（单元）路径。
 ## 功能现状
 
 - **配置流添加/重配**：Client_Id / ClientSecret / botId / 回调地址 / 公网地址均可
@@ -28,14 +28,18 @@ token 无法用于 HA API）。
   有效期 7 天、refresh token 30 天，小度侧用 `grant_type=refresh_token` 换新。
 - **DuerOS 协议**（`dueros/`）：Discovery / Query / Action 三层分发，兼容小度控制台
   「模拟测试」的 DCS multipart 报文与线上纯 JSON 报文。
-- **能力模型**：配置层为「设备 → 单元 → 能力」三级；控制能力（power/brightness/
-  colorTemperature/color/volume/channel/mute/fanSpeed/targetTemperature/mode/
-  suction/pause …）与只读查询能力（temperature/humidity，跨实体聚合）分开管理。
-- **多单元设备**：一台 HA 设备可暴露多个单元（如晾衣杆本体 + 晾衣杆灯），每个单元
-  在小度侧是一个设备；指示灯、提示音、`*_is_on` 等辅助实体自动排除。
+- **能力模型**：配置层为「设备 → 能力」两级（已去掉「单元」概念）；控制能力与只读
+  查询能力（temperature/humidity，跨实体聚合）统一由语义模型的能力合成器管理。
+- **多设备聚合**：一台 HA 设备可暴露多个 DuerOS 设备（如晾衣杆本体 + 晾衣杆灯），
+  每个设备在小度侧是一个小度设备；指示灯、提示音、`*_is_on` 等辅助实体自动排除。
 - **全量设备覆盖**：浴霸（官方 `YUBA` 类型，`setMode`/`unSetMode`）、插座
   （`SOCKET`）、扫地机（含 `continue`）、灯、开关、风扇、空调、窗帘、媒体播放器、
   温湿度计等均按小度官方协议类型暴露。
+- **主动上报**：设备的物理/自动化状态变化会通过 `ChangeReportRequest` 主动推送给
+  小度（按语义模型聚合，`applianceId` 稳定；纯只读传感器不推送，DuerOS 拒绝
+  无控制动作设备的 changereport）。
+- **房间分组**：可开启「同步 HA 房间到小度」，发现时按 HA 房间生成
+  `discoveredGroups`（房间名做安全清洗）。
 - **定时开关**：支持小度定时（`timingTurnOn`/`timingTurnOff`），用 HA 自身的
   `async_track_point_in_utc_time` 调度 + HA Storage 持久化，HA 重启后自动重新布防。
 - **区域同步（可选）**：`sync_areas` 开启后，发现时把 HA 区域（房间）同步为小度
@@ -44,11 +48,10 @@ token 无法用于 HA API）。
   发现（`dueros_sync.py`），并支持实体状态变更上报（`state_report.py`）。
 - **设备与服务页直达**：已同步设备会注册到集成条目名下（条目标题显示为
   「小度中枢」），在 **Settings → 设备与服务 → 小度中枢** 展开即可看到平铺的同步
-  设备列表（带房间信息），无需进入选项流程即可总览；设备行三点菜单提供
-  「单元与能力」单设备编辑入口（由前端模块注入核心组件菜单实现，非官方扩展口，
-  详见 `www/` 文件头注释；若失效仍可通过「设备与能力」选项流程编辑）与官方
+  设备列表（带房间信息），无需进入选项流程即可总览；设备行三点菜单提供官方
   「移除设备」（取消该设备同步，走 HA 官方 `async_remove_config_entry_device`
-  钩子）、“禁用设备”项。这些同步镜像设备以「集成禁用」状态注册，默认不出现在
+  钩子）与「禁用设备」项；**单设备能力配置在集成项 → 「设备与能力」选项流程中完成**
+  （设备 → 能力），设备行不再注入「单元与能力」前置模块。这些同步镜像设备以「集成禁用」状态注册，默认不出现在
   设备列表，避免与设备真实集成（如 Xiaomi Home）重复。
 
 ## 目录结构
@@ -56,27 +59,31 @@ token 无法用于 HA API）。
 ```text
 .
 ├── custom_components/ha_xiaodu/
-│   ├── __init__.py            # 集成入口：setup / unload / 设备注册 / WS 命令
-│   ├── config_flow.py         # 配置流 + 选项流（设备/单元/能力）
+│   ├── __init__.py            # 集成入口：setup / unload / 设备注册（无前端注入）
+│   ├── config_flow.py         # 配置流 + 选项流（设备 → 能力，device → capability）
 │   ├── const.py               # 常量与配置键（含旧配置迁移键）
-│   ├── devices.py             # 设备映射：按 device_id 归组实体、选主实体、派生能力集
+│   ├── devices.py             # 设备/实体辅助：能力派生、设备分类、可暴露域（语义模型依赖）
 │   ├── entity_filter.py       # 旧版实体 include/exclude（读取时自动迁移）
 │   ├── oauth_server.py        # OAuth2 授权/Token 端点 + DuerOS WebService 视图
 │   ├── oauth_store.py         # 不透明 token 签发/持久化（最小权限）
 │   ├── timers.py              # 小度定时开关调度（重启自动重新布防）
 │   ├── dueros_sync.py         # 设备变更推送（devicesync）
-│   ├── state_report.py        # 实体状态变更上报（change report）
+│   ├── state_report.py        # 语义模型状态变更上报（change report，按 DuerDevice 聚合）
 │   ├── dueros/
 │   │   ├── __init__.py        # 对外只暴露 handle_request
 │   │   ├── constants.py       # 协议常量：namespace / 动作 / 错误码 / 设备类型
+│   │   ├── model.py           # 语义模型：DuerDevice / DuerCapability / DuerAttribute / Read|WriteContext
+│   │   ├── composers.py       # 能力合成器：power/brightness/color/温度/湿度/定时/风扇/模式等
+│   │   ├── defaults.py        # 通用设备构建器（按能力组装 DuerDevice，无档案设备兜底）
+│   │   ├── enhanced.py        # 运行时装配：构建 / 过滤 / 候选枚举 / 区域映射（唯一运行时路径）
+│   │   ├── profiles.py        # 设备档案：浴霸（YUBA）/ 晾衣杆 / 扫地机 / 洗衣机
+│   │   ├── registry.py        # 档案-能力注册表
 │   │   ├── adapters.py        # 域适配器注册表（每 HA 域一个适配器）
-│   │   └── protocol.py        # 薄分发层：解析 header → 路由到适配器
+│   │   └── protocol.py        # 协议分发：只走语义模型（enhanced）
 │   ├── manifest.json
 │   ├── strings.json           # 英文文案（UI 源）
 │   └── translations/
 │       └── zh-Hans.json       # 简体中文文案
-│   └── www/
-│       └── ha-xiaodu-device-config.js  # 设备行「单元与能力」菜单注入模块
 ├── tests/                     # 纯逻辑测试 + HA 测试环境测试
 ├── work/                      # 部署辅助脚本 / SSH 密钥（已 gitignore，不入库）
 ├── outputs/                   # 打包产物与部署记录（已 gitignore）
@@ -293,39 +300,42 @@ WebService:              https://<public_url>/api/xiaodu/service
 客户端凭据由你自己定义（例如 `dueros_xxx` + 一串随机字符串），只要与小度后台
 OAuth 配置里填的一致即可，不需要在百度开放平台单独创建应用。
 
-### 选项流：中枢 → 平台 → 设备（单元/能力）
+### 选项流：设备 → 能力（Device → Capability）
 
 添加完成后在集成条目 → **设备与能力（选项）** 中配置，菜单结构为：
 
-1. **中枢**（首层菜单）：展开平台列表 / 添加移除设备 / 保存并完成。
-2. **平台列表**：当前为「小度（N 台设备）」；后续扩展天猫精灵等平台时与它并列。
-3. **平台 → 设备列表**：已同步设备的平铺列表（行标签「房间 · 设备名」，标注
-   （新增）/（已配置）），点击任意设备进入该设备的 **单元 → 能力** 编辑；
+1. **中枢**（首层菜单）：展开设备列表 / 添加移除设备 / 保存并完成。
+2. **设备列表**：已同步设备的平铺列表（行标签「房间 · 设备名」，标注
+   （新增）/（已配置）），点击任意设备进入该设备的 **能力** 勾选页；
    「返回上一级」逐层返回。
-4. **添加 / 移除设备**：多选列表（房间前缀便于筛选）；新设备默认同步其默认单元的
-   全部能力，已保存的设备保留原设置。
-5. **sync_areas（开关）**：把 HA 区域（房间）同步为小度 `discoveredGroups`。
+3. **添加 / 移除设备**：多选列表（房间前缀便于筛选）；新设备默认同步其全部能力，
+   已保存的设备保留原设置。
+4. **sync_areas（开关）**：把 HA 区域（房间）同步为小度 `discoveredGroups`。
 
-每台设备可配置多个 **单元（unit）**（每个单元在小度侧是一个设备；默认单元保持
-设备名，其余单元默认关闭）与 **能力（capabilities）**（`power` 强制开启；只读
-能力如 temperature/humidity 可勾选；新单元默认全选）。
+每台 HA **设备（device）** 可暴露一个或多个 **DuerOS 设备（appliance）**：匹配
+档案的设备（浴霸/晾衣杆/扫地机/洗衣机）按档案聚合，其它设备由通用合成器按能力
+组装。**能力（capabilities）** 为用户可勾选集合（`power` 对控制类强制开启；
+只读能力如 temperature/humidity 可勾选；新设备默认全选）。
 
-旧版「实体 include/exclude」选项会在读取时自动迁移为「设备 + 默认全能力」，
-无需手动处理。
+旧版「实体 include/exclude」选项会在读取时自动迁移，无需手动处理。
 
 ## DuerOS 协议
 
 WebService 端点 `POST /api/xiaodu/service`（小度后台 WebService 字段填写
-`https://<public_url>/api/xiaodu/service`）接收小度智能家居请求，按三层结构分发：
+`https://<public_url>/api/xiaodu/service`）接收小度智能家居请求，所有请求只走
+DuerOS **语义模型**：
 
 ```text
-配置层：设备 + 单元 + 能力勾选（power 强制）
+配置层：设备 → 能力勾选（power 强制；只读能力可勾选）
         │
         ▼
-devices.py  XiaoduDeviceMap   # 按 device_id 归组实体、选主实体、派生能力集
+dueros/enhanced.py  build_enhanced_device_set   # 语义模型运行时装配（唯一路径）
+        │  档案优先（profiles.py）→ 通用兜底（defaults.py）
+        ▼
+dueros/model.py   DuerDevice / DuerCapability / DuerAttribute
         │
         ▼
-dueros/protocol.py            # 小度平台层：能力 → DuerOS 动作/属性翻译
+dueros/protocol.py  handle_request  # Discovery / Query / Control 分发（只走 enhanced）
 ```
 
 新增音箱（天猫精灵/小爱等）只需新写平台翻译层，复用 `devices.py` 的能力模型。

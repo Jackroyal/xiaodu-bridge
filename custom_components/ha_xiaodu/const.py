@@ -46,3 +46,14 @@ CONF_UNITS = "units"
 CONF_ENTITY_INCLUDE = "entity_include"
 CONF_ENTITY_EXCLUDE = "entity_exclude"
 CONF_SYNC_AREAS = "sync_areas"
+
+# --- Enhanced (device-center) semantic model opt-in ---------------------------
+# When enabled, a HA device with a matching device profile is exposed through
+# the DuerOS semantic model (DuerDevice + CapabilityMapping) instead of the
+# legacy per-entity unit path. Both paths coexist: only enrolled devices change.
+CONF_ENABLE_ENHANCED = "enable_enhanced"
+# {profile_key: [primary entity_id, ...]}: explicit enrollment for gray rollout.
+CONF_ENHANCED_PROFILES = "enhanced_profiles"
+
+# Runtime state key for the enhanced device set.
+DATA_ENHANCED_DEVICES = "enhanced_devices"
