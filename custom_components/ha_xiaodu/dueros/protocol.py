@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from ..devices import XiaoduDeviceMap, XiaoduUnit
 
-from ..const import DATA_STATE_REPORT_MANAGER, DATA_TIMER_MANAGER, DOMAIN
+from ..const import DATA_ENHANCED_DEVICES, DATA_STATE_REPORT_MANAGER, DATA_TIMER_MANAGER, DOMAIN
 from ..devices import (
     CAP_BRIGHTNESS,
     CAP_CHANNEL,
@@ -40,7 +40,10 @@ from ..devices import (
     DEVICE_CLASS_YUBA,
 )
 from .adapters import extra_attributes, get_adapter
+from .enhanced import EnhancedDeviceSet
+from .model import AttributeValue, DuerAction, ReadContext, WriteContext
 from .constants import (
+    APP_VERSION,
     ACTION_TIMING_TURN_OFF,
     ACTION_TIMING_TURN_ON,
     ACTION_TURN_OFF,
@@ -226,12 +229,184 @@ def _discovery_groups(
     return groups
 
 
+
+
+# --- enhanced (device-center) semantic model dispatch -------------------------
+
+def _enhanced_read_ctx(hass: Any, device: Any, mapping: Any) -> ReadContext:
+    """Resolve a capability mapping's bindings into role -> state."""
+    entities: dict[str, Any] = {}
+    for binding in mapping.bindings:
+        state = hass.states.get(binding.entity_id)
+        if state is not None:
+            entities[binding.role] = state
+    return ReadContext(hass=hass, device=device, entities=entities)
+
+
+def _enhanced_attribute_values(hass: Any, device: Any, only_mapping: Any = None) -> list[dict[str, Any]]:
+    """Current attributes (serialized) for a DuerDevice, optionally one mapping."""
+    values: list[dict[str, Any]] = []
+    for mapping in device.capabilities:
+        if only_mapping is not None and mapping is not only_mapping:
+            continue
+        attr = mapping.read(_enhanced_read_ctx(hass, device, mapping))
+        if attr is not None:
+            values.append(attr.to_dict())
+    return values
+
+
+def _enhanced_groups(enhanced: Any) -> list[dict[str, Any]]:
+    """Build ``discoveredGroups`` from HA areas when sync_areas is enabled."""
+    if not getattr(enhanced, "sync_areas", False):
+        return []
+    by_area: dict[str, list[str]] = {}
+    for device in enhanced.all():
+        area = enhanced.area(device.device_id)
+        if area:
+            by_area.setdefault(area, []).append(device.device_id)
+    groups: list[dict[str, Any]] = []
+    for area_name in sorted(by_area):
+        group_name = _clean_group_name(area_name)
+        if not group_name:
+            continue
+        groups.append({"groupName": group_name, "applianceIds": by_area[area_name][:50]})
+        if len(groups) >= 10:
+            break
+    return groups
+
+
+def _enhanced_discovery(hass: Any, enhanced: Any) -> list[dict[str, Any]]:
+    """Build the ``discoveredAppliances`` entries for enhanced devices."""
+    appliances: list[dict[str, Any]] = []
+    for device in enhanced.all():
+        attrs = _enhanced_attribute_values(hass, device)[:10]
+        appliances.append(
+            {
+                "applianceId": device.device_id,
+                "friendlyName": device.friendly_name,
+                "friendlyDescription": device.friendly_name,
+                "additionalApplianceDetails": {},
+                "applianceTypes": list(device.appliance_types or ()),
+                "isReachable": device.is_reachable,
+                "manufacturerName": "Home Assistant",
+                "modelName": device.profile_key,
+                "version": APP_VERSION,
+                "actions": device.actions(),
+                "attributes": attrs,
+            }
+        )
+    return appliances
+
+
+async def _enhanced_control(
+    hass: Any, enhanced: Any, header: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    appliance = payload.get("appliance") or {}
+    device = enhanced.resolve(str(appliance.get("applianceId", "")))
+    if device is None:
+        return _error_response(header, ERROR_DEVICE_NOT_FOUND)
+
+    action = _action_name(str(header.get("name", "")))
+    found = device.find_action(action)
+    if found is None:
+        return _error_response(header, ERROR_UNSUPPORTED)
+    mapping, dueros_action = found
+
+    state = hass.states.get(device.primary_entity_id)
+    if state is not None and state.state == "unavailable":
+        return _error_response(header, ERROR_OFFLINE)
+
+    write_ctx = WriteContext(
+        hass=hass,
+        device=device,
+        entities=_enhanced_read_ctx(hass, device, mapping).entities,
+        action=dueros_action,
+        payload=payload,
+    )
+    calls = mapping.write(write_ctx)
+    if calls is None:
+        return _error_response(header, ERROR_UNSUPPORTED)
+
+    for call in calls:
+        target = call.target_entity_id or device.primary_entity_id
+        service_data = {**call.data, "entity_id": target}
+        try:
+            await hass.services.async_call(call.domain, call.service, service_data, blocking=True)
+        except Exception as err:  # noqa: BLE001 - report as driver error
+            _LOGGER.error("Xiaodu enhanced control failed for %s: %s", device.device_id, err)
+            return _error_response(header, ERROR_SERVICE)
+
+    # The confirmation message below already carries the fresh attributes back
+    # to DuerOS; suppress the redundant changereport for this appliance.
+    report_manager = hass.data.get(DOMAIN, {}).get(DATA_STATE_REPORT_MANAGER)
+    if report_manager is not None:
+        report_manager.mark_confirmed(device.device_id)
+
+    return _respond(
+        header,
+        _confirmation_name(str(header.get("name", ""))),
+        {"attributes": _enhanced_attribute_values(hass, device)},
+    )
+
+
+def _enhanced_query(
+    hass: Any, enhanced: Any, header: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    appliance = payload.get("appliance") or {}
+    device = enhanced.resolve(str(appliance.get("applianceId", "")))
+    if device is None:
+        return _error_response(header, ERROR_DEVICE_NOT_FOUND)
+
+    query_name = str(header.get("name", ""))
+    mapping = device.find_query_capability(query_name)
+    if mapping is None:
+        # A query for a specific reading (temperature / humidity) that the
+        # device does not support is an error, not a generic attribute dump.
+        if query_name in ("GetTemperatureReadingRequest", "GetHumidityRequest"):
+            return _error_response(header, ERROR_UNSUPPORTED)
+        # Generic query: answer with the full attribute set, like discovery.
+        return _respond(
+            header, _response_name(query_name), {"attributes": _enhanced_attribute_values(hass, device)}
+        )
+
+    ctx = _enhanced_read_ctx(hass, device, mapping)
+    result = mapping.query(ctx, query_name)
+    if result is None:
+        return _error_response(header, ERROR_UNSUPPORTED)
+
+    if query_name == "GetTemperatureReadingRequest":
+        temp = result if isinstance(result, AttributeValue) else next(
+            (a for a in result if getattr(a, "name", "") == "temperature"), None
+        )
+        if temp is None:
+            return _error_response(header, ERROR_UNSUPPORTED)
+        return _respond(
+            header,
+            _response_name(query_name),
+            {
+                "temperatureReading": {"value": temp.value, "scale": temp.scale},
+                "applianceResponseTimestamp": "",
+            },
+        )
+
+    if isinstance(result, AttributeValue):
+        attributes = [result.to_dict()]
+    else:
+        attributes = [a.to_dict() for a in (result or ())]
+    return _respond(header, _response_name(query_name), {"attributes": attributes})
+
+
 def _discovery(
-    hass: HomeAssistant, devices: XiaoduDeviceMap, header: dict[str, Any]
+    hass: HomeAssistant,
+    devices: XiaoduDeviceMap,
+    header: dict[str, Any],
+    claimed_entity_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     appliances: list[dict[str, Any]] = []
     for device in devices.devices():
         for unit in device.units:
+            if unit.entity_id in claimed_entity_ids:
+                continue  # handled by the enhanced semantic model instead
             if not unit.enabled:
                 continue  # unit not selected in the options
             state = hass.states.get(unit.entity_id)
@@ -481,13 +656,86 @@ def _query(
     return _respond(header, _response_name(action), {"attributes": attributes})
 
 
-async def handle_request(
-    hass: HomeAssistant, devices: XiaoduDeviceMap, data: dict[str, Any]
-) -> dict[str, Any]:
-    """Dispatch a DuerOS smart-home request and return the response.
 
-    ``devices`` is the resolved device map (see ``devices.build_device_map``);
-    every appliance the skill can reach is one exposed device in that map.
+
+def _get_enhanced(hass: HomeAssistant) -> EnhancedDeviceSet | None:
+    """Return the enhanced device set, building it on demand if needed.
+
+    The set is the only runtime model; it is built on demand from the current
+    HA state / device profiles so the device-center path is always consulted.
+    """
+    try:
+        cached = hass.data.get(DOMAIN, {}).get(DATA_ENHANCED_DEVICES)
+        if cached is not None:
+            return cached
+        from .enhanced import build_enhanced_for_hass  # noqa: PLC0415
+
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            return None
+        built = build_enhanced_for_hass(hass, entries[0])
+        hass.data.setdefault(DOMAIN, {})[DATA_ENHANCED_DEVICES] = built
+        return built
+    except Exception:  # noqa: BLE001 - never break the request path
+        return None
+
+
+async def _enhanced_timing_control(
+    hass: HomeAssistant,
+    device: Any,
+    header: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Schedule a timingTurnOn / timingTurnOff via HA's persisted timer manager."""
+    timestamp = _to_float((payload.get("timestamp") or {}).get("value"))
+    if timestamp is None or timestamp <= 0:
+        return _error_response(header, ERROR_UNSUPPORTED)
+    action = _action_name(str(header.get("name", "")))
+    base_action = ACTION_TURN_ON if action == ACTION_TIMING_TURN_ON else ACTION_TURN_OFF
+    found = device.find_action(base_action)
+    if found is None:
+        return _error_response(header, ERROR_UNSUPPORTED)
+    mapping, dueros_action = found
+    write_ctx = WriteContext(
+        hass=hass,
+        device=device,
+        entities=_enhanced_read_ctx(hass, device, mapping).entities,
+        action=DuerAction(base_action, mapping.key),
+        payload={},
+    )
+    calls = mapping.write(write_ctx)
+    if not calls:
+        return _error_response(header, ERROR_UNSUPPORTED)
+    call = calls[0]
+    target = call.target_entity_id or device.primary_entity_id
+
+    data_by_domain = hass.data.setdefault(DOMAIN, {})
+    manager = data_by_domain.get(DATA_TIMER_MANAGER)
+    if manager is None:
+        from ..timers import TimedServiceManager  # noqa: PLC0415
+
+        manager = TimedServiceManager(hass)
+        data_by_domain[DATA_TIMER_MANAGER] = manager
+        await manager.async_load()
+    await manager.schedule(
+        call.domain, call.service, {**call.data, "entity_id": target}, timestamp
+    )
+    return _respond(
+        header,
+        _confirmation_name(str(header.get("name", ""))),
+        {"attributes": []},
+    )
+
+
+async def handle_request(
+    hass: HomeAssistant, devices: Any, data: dict[str, Any]
+) -> dict[str, Any]:
+    """Dispatch a DuerOS smart-home request through the DuerOS semantic model.
+
+    ``devices`` is kept for signature compatibility (it may be an
+    ``EnhancedDeviceSet``); the authoritative source is the enhanced set cached
+    in ``hass.data`` (or built on demand by ``_get_enhanced``). The legacy
+    per-entity path is no longer used by the dispatcher.
     """
     header = data.get("header") or {}
     payload = data.get("payload") or {}
@@ -501,10 +749,35 @@ async def handle_request(
         message_id,
     )
 
+    # Prefer the enhanced set passed by the caller (the runtime path); fall
+    # back to the cached set in ``hass.data`` (on-demand build).
+    enhanced = devices if isinstance(devices, EnhancedDeviceSet) else _get_enhanced(hass)
+    has_enhanced = bool(enhanced)
+    if not has_enhanced:
+        return _error_response(header, ERROR_DEVICE_NOT_FOUND)
+
+    appliance_id = str(payload.get("appliance", {}).get("applianceId", ""))
+
     if namespace == NAMESPACE_DISCOVERY:
-        return _discovery(hass, devices, header)
+        return _respond(
+            header,
+            "DiscoverAppliancesResponse",
+            {
+                "discoveredAppliances": _enhanced_discovery(hass, enhanced),
+                "discoveredGroups": _enhanced_groups(enhanced),
+            },
+        )
     if namespace == NAMESPACE_CONTROL:
-        return await _control(hass, devices, header, payload)
+        device = enhanced.resolve(appliance_id)
+        if device is None:
+            return _error_response(header, ERROR_DEVICE_NOT_FOUND)
+        action = _action_name(str(header.get("name", "")))
+        if action in (ACTION_TIMING_TURN_ON, ACTION_TIMING_TURN_OFF):
+            return await _enhanced_timing_control(hass, device, header, payload)
+        return await _enhanced_control(hass, enhanced, header, payload)
     if namespace == NAMESPACE_QUERY:
-        return _query(hass, devices, header, payload)
+        device = enhanced.resolve(appliance_id)
+        if device is None:
+            return _error_response(header, ERROR_DEVICE_NOT_FOUND)
+        return _enhanced_query(hass, enhanced, header, payload)
     return _error_response(header, ERROR_UNSUPPORTED)

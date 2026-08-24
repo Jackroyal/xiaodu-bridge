@@ -59,6 +59,7 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_REDIRECT_URI,
+    DATA_ENHANCED_DEVICES,
     DOMAIN,
     DUEROS_API_PATH,
     DUEROS_SERVICE_PATH,
@@ -67,7 +68,7 @@ from .const import (
     OAUTH_TOKEN_PATH,
 )
 from .dueros.dcs_envelope import fill_smarthome_response, parse_dcs_multipart
-from .devices import build_device_map, summarize_devices
+from .devices import CAP_LABELS
 from .dueros import handle_request
 from .dueros.constants import NAMESPACE_DISCOVERY, NAMESPACE_UNBIND
 from .oauth_store import XiaoduOAuthStore
@@ -193,7 +194,22 @@ async def _save_store(hass: HomeAssistant) -> None:
 
 def _exposed_device_summary(hass: HomeAssistant, entry: ConfigEntry) -> str:
     """Return a human-readable summary of devices exposed to Xiaodu."""
-    return summarize_devices(build_device_map(hass, entry.options))
+    enhanced = hass.data.get(DOMAIN, {}).get(DATA_ENHANCED_DEVICES)
+    if enhanced is None:
+        from .dueros.enhanced import build_enhanced_for_hass  # noqa: PLC0415
+
+        enhanced = build_enhanced_for_hass(hass, entry)
+    if not enhanced:
+        return "0 台设备（当前没有可暴露的设备）"
+    parts: list[str] = []
+    for dev in enhanced.all():
+        labels = [CAP_LABELS[c.key] for c in dev.capabilities if c.key in CAP_LABELS]
+        if labels:
+            parts.append(f"{dev.friendly_name}（{'、'.join(labels)}）")
+    text = "、".join(parts[:6])
+    if len(parts) > 6:
+        text += " 等"
+    return f"{len(enhanced.all())} 台设备：{text}"
 
 
 # ---------------------------------------------------------------------------
@@ -672,10 +688,10 @@ async def _process_dueros_request(
             await _save_store(hass)
             _LOGGER.info("Xiaodu recorded openUid %s (user %s)", open_uid, user_id or "?")
 
-    devices = build_device_map(hass, entry.options)
+    enhanced = hass.data.get(DOMAIN, {}).get(DATA_ENHANCED_DEVICES)
 
     try:
-        response = await handle_request(hass, devices, data)
+        response = await handle_request(hass, enhanced, data)
         result = (response.get("header") or {}).get("name", "OK")
         status = 200
     except Exception:  # noqa: BLE001 - protocol errors must not 500 the skill

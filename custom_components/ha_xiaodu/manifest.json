@@ -1,15 +1,21 @@
 {
   "domain": "ha_xiaodu",
   "name": "Xiaodu (DuerOS)",
-  "codeowners": ["@Jackroyal"],
+  "codeowners": [
+    "@Jackroyal"
+  ],
   "config_flow": true,
-  "dependencies": ["frontend", "http", "websocket_api"],
+  "dependencies": [
+    "frontend",
+    "http",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/Jackroyal/ha-xiaodu",
   "homeassistant": "2025.1.0",
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/Jackroyal/ha-xiaodu/issues",
   "requirements": [],
-  "version": "0.7.8",
+  "version": "0.9.0",
   "single_config_entry": true
 }
