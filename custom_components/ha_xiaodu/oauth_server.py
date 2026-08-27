@@ -1,4 +1,4 @@
-"""OAuth2 authorization server endpoints for the Xiaodu (DuerOS) skill.
+"""OAuth2 authorization server endpoints for the xiaodu skill.
 
 The Xiaodu smart-home skill acts as the OAuth2 *client*: it redirects the user
 to our authorize endpoint and then exchanges the returned authorization code
