@@ -16,6 +16,6 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/Jackroyal/ha-xiaodu/issues",
   "requirements": [],
-  "version": "0.9.1",
+  "version": "0.9.2",
   "single_config_entry": true
 }
