@@ -1,4 +1,4 @@
-"""Xiaodu (DuerOS) integration for Home Assistant.
+"""xiaodu integration for Home Assistant.
 
 This is a hub integration without entity platforms: it serves the OAuth2
 endpoints and the DuerOS smart-home WebService. The HTTP views are registered
@@ -43,7 +43,7 @@ from .timers import TimedServiceManager
 _LOGGER = logging.getLogger(__name__)
 
 # Title shown on the integration page for this hub entry.
-ENTRY_TITLE = "小度中枢"
+ENTRY_TITLE = "xiaodu"
 DEVICE_MANUFACTURER = "DuerOS"
 DEVICE_MODEL = "小度智能中枢"
 
@@ -85,7 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # WebService on the first request (see dueros.protocol._get_enhanced) and
     # cached in ``hass.data``, so it always reflects devices loaded at that time.
     # Give the hub entry a readable headline on the integrations page.
-    if not entry.title or entry.title == "Xiaodu":
+    if not entry.title or entry.title in ("Xiaodu", "xiaodu"):
         hass.config_entries.async_update_entry(entry, title=ENTRY_TITLE)
     # Ensure the single hub device exists so the integrations page row can
     # fold open (HomeKit-Bridge style: one virtual device per hub entry).

@@ -1,4 +1,4 @@
-# Home Assistant Custom Integration: Xiaodu (DuerOS)
+# Home Assistant Custom Integration: xiaodu
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![Hassfest](https://github.com/Jackroyal/ha-xiaodu/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Jackroyal/ha-xiaodu/actions/workflows/hassfest.yml)
@@ -44,7 +44,7 @@
 1. 确认已安装 [HACS](https://hacs.xyz)。
 2. 打开 **HACS → Integrations**。
 3. 选择 **Explore & Download Repositories**。
-4. 搜索 **Xiaodu**，或先添加本仓库为 Custom Repository：
+4. 搜索 **xiaodu**，或先添加本仓库为 Custom Repository：
    `https://github.com/Jackroyal/ha-xiaodu`，类别选择 **Integration**。
 5. 下载后重启 Home Assistant。
 
@@ -56,7 +56,7 @@
 /config/custom_components/ha_xiaodu
 ```
 
-重启 Home Assistant 后，进入 **设置 → 设备与服务 → 添加集成**，搜索 **Xiaodu**。
+重启 Home Assistant 后，进入 **设置 → 设备与服务 → 添加集成**，搜索 **xiaodu**。
 
 ## 配置集成
 
