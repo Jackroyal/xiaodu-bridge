@@ -147,9 +147,9 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     这些镜像设备一律带 ``disabled_by=DeviceEntryDisabler.INTEGRATION``：
     HA 2026.8 的设备页默认过滤已禁用设备，因此同一台设备不会在「设置 →
     设备」列表里和 Xiaomi Home 的真实设备重复出现；但设备仍保留在注册表
-    中，集成页的折叠展开、设备计数、「移除设备」入口与注入的「单元与能力」
-    菜单全部照常工作（行会按禁用态置灰显示）。需要核对时在设备页勾选
-    「已禁用」筛选即可看到这些镜像。
+    中，集成页的折叠展开、设备计数与官方「移除设备」入口照常工作（行会
+    按禁用态置灰显示）。需要核对时在设备页勾选「已禁用」筛选即可看到
+    这些镜像；单设备能力配置走集成项的「设备与能力」选项流程。
     """
     registry = dr.async_get(hass)
     devices_config = entry.options.get(CONF_DEVICES) or {}

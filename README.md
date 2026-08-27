@@ -2,7 +2,7 @@
 
 项目仓库：<https://github.com/Jackroyal/ha-xiaodu>
 
-小度智能家居自定义集成（当前版本 **v0.9.0**）：让 Home Assistant 中的设备可以被
+小度智能家居自定义集成（当前版本 **v0.9.1**）：让 Home Assistant 中的设备可以被
 小度音箱 / 小度 App 发现、查询与控制。架构为「小度当 OAuth 客户端、本集成当授权
 服务器」：集成通过 `/api/xiaodu`、`/api/xiaodu/service` 接收小度智能家居请求，
 把 HA 实体映射为小度设备/能力，并签发仅限本集成的私有不透明 token（最小权限，
@@ -61,9 +61,8 @@ token 无法用于 HA API）。
 ├── custom_components/ha_xiaodu/
 │   ├── __init__.py            # 集成入口：setup / unload / 设备注册（无前端注入）
 │   ├── config_flow.py         # 配置流 + 选项流（设备 → 能力，device → capability）
-│   ├── const.py               # 常量与配置键（含旧配置迁移键）
+│   ├── const.py               # 常量与配置键
 │   ├── devices.py             # 设备/实体辅助：能力派生、设备分类、可暴露域（语义模型依赖）
-│   ├── entity_filter.py       # 旧版实体 include/exclude（读取时自动迁移）
 │   ├── oauth_server.py        # OAuth2 授权/Token 端点 + DuerOS WebService 视图
 │   ├── oauth_store.py         # 不透明 token 签发/持久化（最小权限）
 │   ├── timers.py              # 小度定时开关调度（重启自动重新布防）
@@ -317,7 +316,6 @@ OAuth 配置里填的一致即可，不需要在百度开放平台单独创建�
 组装。**能力（capabilities）** 为用户可勾选集合（`power` 对控制类强制开启；
 只读能力如 temperature/humidity 可勾选；新设备默认全选）。
 
-旧版「实体 include/exclude」选项会在读取时自动迁移，无需手动处理。
 
 ## DuerOS 协议
 
@@ -445,7 +443,7 @@ HA 的 `ha core logs` 中按 `xiaodu` 过滤查看。
 
 ```bash
 pip install pytest
-pytest tests/test_entity_filter.py
+pytest tests/test_devices.py
 ```
 
 完整测试需要 Home Assistant 测试环境（用于配置流与 setup/unload）：

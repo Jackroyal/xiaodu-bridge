@@ -7,7 +7,7 @@ has no dependency on integration-level configuration keys.
 from __future__ import annotations
 
 # Appliance version reported to Xiaodu (keep in sync with manifest.json).
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 
 # Request namespaces
 NAMESPACE_DISCOVERY = "DuerOS.ConnectedHome.Discovery"

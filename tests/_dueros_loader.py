@@ -34,7 +34,6 @@ def _load_parent() -> types.ModuleType:
     parent.__path__ = [str(_XIAODU)]
     sys.modules["xiaodu"] = parent
     _load_module("xiaodu.const", _XIAODU / "const.py")
-    _load_module("xiaodu.entity_filter", _XIAODU / "entity_filter.py")
     _load_module("xiaodu.devices", _XIAODU / "devices.py")
     return parent
 
@@ -46,7 +45,7 @@ def load_devices() -> types.ModuleType:
 
 
 def load_dueros() -> tuple:
-    """Return (handle_request, EntityFilter, protocol_module)."""
+    """Return (handle_request, protocol_module)."""
     _load_parent()
 
     pkg = types.ModuleType("xiaodu.dueros")
@@ -58,7 +57,7 @@ def load_dueros() -> tuple:
     _load_module("xiaodu.dueros.adapters", _XIAODU / "dueros" / "adapters.py")
     protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
 
-    return protocol.handle_request, sys.modules["xiaodu.entity_filter"].EntityFilter, protocol
+    return protocol.handle_request, protocol
 
 
 def load_semantic_model() -> types.ModuleType:

@@ -7,7 +7,7 @@ import sys
 
 from tests._dueros_loader import load_devices, load_dueros
 
-handle_request, EntityFilter, protocol = load_dueros()
+handle_request, protocol = load_dueros()
 devices_mod = load_devices()
 enhanced_mod = sys.modules["xiaodu.dueros.enhanced"]
 NAMESPACE_CONTROL = protocol.NAMESPACE_CONTROL
