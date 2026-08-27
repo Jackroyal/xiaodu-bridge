@@ -1,4 +1,4 @@
-"""Constants for the Xiaodu (DuerOS) integration."""
+"""Constants for the xiaodu integration."""
 
 from __future__ import annotations
 

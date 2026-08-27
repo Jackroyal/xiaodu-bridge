@@ -1,4 +1,4 @@
-"""Config flow for the Xiaodu (DuerOS) integration."""
+"""Config flow for the xiaodu integration."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ class XiaoduConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Show the three URLs to fill in on the Xiaodu console."""
         if user_input is not None:
-            return self.async_create_entry(title="Xiaodu", data=self._data)
+            return self.async_create_entry(title="xiaodu", data=self._data)
 
         base = self._data[CONF_PUBLIC_URL]
         return self.async_show_form(
