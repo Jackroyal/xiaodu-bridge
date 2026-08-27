@@ -37,12 +37,10 @@ OAUTH_REFRESH_TOKEN_EXPIRE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 DATA_TIMER_MANAGER = "timed_services"
 DATA_STATE_REPORT_MANAGER = "state_report"
 
-# Capability-model device selection: device_key -> enabled caps.
-# Legacy entity include/exclude keys below are still read for migration.
+# Device selection options: device_key -> enabled capability keys.
 CONF_DEVICES = "devices"
 CONF_CAPABILITIES = "capabilities"
-CONF_DEVICE = "device"
-CONF_UNITS = "units"
-CONF_ENTITY_INCLUDE = "entity_include"
-CONF_ENTITY_EXCLUDE = "entity_exclude"
 CONF_SYNC_AREAS = "sync_areas"
+
+# Runtime state key for the enhanced device set.
+DATA_ENHANCED_DEVICES = "enhanced_devices"

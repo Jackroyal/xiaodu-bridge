@@ -41,39 +41,27 @@
   "options": {
     "step": {
       "init": {
-        "title": "Devices and capabilities",
-        "description": "Click the \"中枢\" section to expand it into the speaker platforms (小度, Tmall Genie later), then a platform to see and edit the synced devices.\n\nCurrently authorized: {exposed_summary}\nExposable devices: {candidate_count}"
+        "title": "小度中枢",
+        "description": "Select which Home Assistant devices to expose to 小度. Each device is shown with the capabilities it can offer; open a device to pick the capabilities to enable.\n\nExposable devices: {candidate_count}"
       },
-      "platform": {
-        "title": "中枢",
-        "description": "Click a platform to open the flat list of its synced devices.",
-        "data": {}
-      },
-      "group": {
-        "title": "小度",
-        "description": "{count} device(s) synced. Click a device to edit which units and capabilities it syncs.",
+      "devices": {
+        "title": "已选设备",
+        "description": "{count} device(s) selected. Click a device to configure its capabilities.",
         "data": {}
       },
       "manage": {
-        "title": "Manage devices",
-        "description": "Select which devices Xiaodu may discover and control. Rooms are shown as a prefix to help filtering.",
+        "title": "添加 / 移除设备",
+        "description": "Select which devices Xiaodu may discover and control.",
         "data": {
           "devices": "Devices to expose to Xiaodu",
           "sync_areas": "Sync Home Assistant rooms to Xiaodu"
         }
       },
-      "unit_select": {
-        "title": "Sync units",
-        "description": "Configure \"{device_name}\".\n\n{unit_hint}",
+      "edit_device": {
+        "title": "设备能力",
+        "description": "Configure \"{device_name}\".\n\n开关能力始终启用，不可取消。",
         "data": {
-          "units": "Units to sync to Xiaodu (multi-select)"
-        }
-      },
-      "unit_caps": {
-        "title": "Capabilities",
-        "description": "Configure \"{device_name} · {unit_name}\".\n\n{power_note}",
-        "data": {
-          "capabilities": "Capabilities to enable (multi-select)"
+          "capabilities": "要启用的能力（多选）"
         }
       }
     }

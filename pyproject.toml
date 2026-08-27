@@ -1,6 +1,6 @@
 [project]
 name = "home-assistant-xiaodu"
-version = "0.7.9"
+version = "0.9.2"
 description = "Home Assistant custom integration for Xiaodu (DuerOS)"
 requires-python = ">=3.12"
 

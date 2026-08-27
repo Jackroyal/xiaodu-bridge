@@ -41,37 +41,25 @@
   "options": {
     "step": {
       "init": {
-        "title": "设备与能力",
-        "description": "点击「中枢」展开平台列表（小度，后续可并列天猫精灵等），再点击平台查看并编辑其同步设备。\n\n当前授权小度访问：{exposed_summary}\n可暴露设备数：{candidate_count}"
+        "title": "小度中枢",
+        "description": "选择要暴露给小度的 Home Assistant 设备。每个设备会列出它能提供的能力；点击设备可选择要启用的能力。\n\n可暴露设备数：{candidate_count}"
       },
-      "platform": {
-        "title": "中枢",
-        "description": "点击平台展开其同步设备的平铺列表。",
-        "data": {}
-      },
-      "group": {
-        "title": "小度",
-        "description": "已同步 {count} 台设备。点击设备可编辑其同步单元与能力。",
+      "devices": {
+        "title": "已选设备",
+        "description": "已选 {count} 台设备。点击设备可配置其能力。",
         "data": {}
       },
       "manage": {
-        "title": "管理设备",
-        "description": "选择允许小度发现和控制的设备。列表带房间前缀便于筛选。",
+        "title": "添加 / 移除设备",
+        "description": "选择允许小度发现和控制的设备。",
         "data": {
           "devices": "暴露给小度的设备",
           "sync_areas": "同步 HA 房间到小度"
         }
       },
-      "unit_select": {
-        "title": "同步单元",
-        "description": "配置「{device_name}」。\n\n{unit_hint}",
-        "data": {
-          "units": "要同步给小度的单元（可多选）"
-        }
-      },
-      "unit_caps": {
-        "title": "能力选择",
-        "description": "配置「{device_name} · {unit_name}」。\n\n{power_note}",
+      "edit_device": {
+        "title": "设备能力",
+        "description": "配置「{device_name}」。\n\n开关能力始终启用，不可取消。",
         "data": {
           "capabilities": "要启用的能力（可多选）"
         }

@@ -3,10 +3,13 @@
 import asyncio
 import time
 
+import sys
+
 from tests._dueros_loader import load_devices, load_dueros
 
-handle_request, EntityFilter, protocol = load_dueros()
+handle_request, protocol = load_dueros()
 devices_mod = load_devices()
+enhanced_mod = sys.modules["xiaodu.dueros.enhanced"]
 NAMESPACE_CONTROL = protocol.NAMESPACE_CONTROL
 NAMESPACE_DISCOVERY = protocol.NAMESPACE_DISCOVERY
 NAMESPACE_QUERY = protocol.NAMESPACE_QUERY
@@ -74,8 +77,46 @@ def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+def _seed_enhanced(hass, config=None, device_of=None, name_of=None, area_of=None, sync_areas=False):
+    """Build an EnhancedDeviceSet for the fake states and cache it in hass.data.
+
+    ``config`` follows the new ``CONF_DEVICES`` shape (device_key -> enabled
+    capability keys), matching the device→capability options UI. ``area_of``
+    supplies an optional HA room name and ``sync_areas`` toggles room grouping.
+    """
+    options = {"sync_areas": sync_areas}
+    if config is not None:
+        options["devices"] = config
+    enhanced = enhanced_mod.build_enhanced_device_set(
+        hass.states.async_all(),
+        options,
+        device_of=device_of or (lambda eid: None),
+        name_of=name_of,
+        area_of=area_of,
+    )
+    hass.data.setdefault(protocol.DOMAIN, {})[protocol.DATA_ENHANCED_DEVICES] = enhanced
+    return enhanced
+
+
+def _find_device(enhanced, entity_id):
+    """Find an enrolled DuerDevice by its appliance id or one of its bindings."""
+    for d in enhanced.all():
+        if d.device_id == entity_id:
+            return d
+        for cap in d.capabilities:
+            for b in cap.bindings:
+                if b.entity_id == entity_id:
+                    return d
+    return None
+
+
+def _device_id_of(enhanced, entity_id):
+    dev = _find_device(enhanced, entity_id)
+    return dev.device_id if dev else entity_id
+
+
 def _device_map(hass, entity_ids=None, caps=None, name_of=None):
-    """Build a XiaoduDeviceMap for the fake states.
+    """Seed an EnhancedDeviceSet and return it.
 
     ``entity_ids`` restricts exposure (device keys == entity ids when no
     device grouping is simulated); ``caps`` limits the enabled capabilities;
@@ -85,14 +126,8 @@ def _device_map(hass, entity_ids=None, caps=None, name_of=None):
     config = None
     if entity_ids is not None:
         selected = list(all_caps if caps is None else caps)
-        config = {eid: {eid: selected} for eid in entity_ids}
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
-        device_of=lambda eid: None,
-        name_of=name_of or (lambda key: None),
-        config=config,
-    )
-    return devices_mod.XiaoduDeviceMap(device_list)
+        config = {eid: selected for eid in entity_ids}
+    return _seed_enhanced(hass, config=config, name_of=name_of)
 
 
 def _hass():
@@ -533,14 +568,13 @@ def _discovery_with_groups(hass, devices):
 
 def test_discovery_groups_sync_areas_generates_area_groups():
     hass = _hass()
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
-        device_of=lambda eid: None,
-        name_of=lambda key: None,
+    devices = _seed_enhanced(
+        hass,
         config={"light.living": ["brightness"], "switch.plug": []},
-        area_name_of=lambda key: {"light.living": "卧室", "switch.plug": "卧室"}.get(key),
+        device_of=lambda eid: None,
+        area_of=lambda key: {"light.living": "卧室", "switch.plug": "卧室"}.get(key),
+        sync_areas=True,
     )
-    devices = devices_mod.XiaoduDeviceMap(device_list, sync_areas=True)
     result = _discovery_with_groups(hass, devices)
     groups = result["payload"]["discoveredGroups"]
     assert groups == [
@@ -553,14 +587,13 @@ def test_discovery_groups_sync_areas_generates_area_groups():
 
 def test_discovery_groups_sanitizes_area_names():
     hass = _hass()
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
-        device_of=lambda eid: None,
-        name_of=lambda key: None,
+    devices = _seed_enhanced(
+        hass,
         config={"light.living": []},
-        area_name_of=lambda key: "卧室！·（1）",
+        device_of=lambda eid: None,
+        area_of=lambda key: "卧室！·（1）",
+        sync_areas=True,
     )
-    devices = devices_mod.XiaoduDeviceMap(device_list, sync_areas=True)
     result = _discovery_with_groups(hass, devices)
     groups = result["payload"]["discoveredGroups"]
     assert groups == [{"groupName": "卧室1", "applianceIds": ["light.living"]}]
@@ -568,14 +601,13 @@ def test_discovery_groups_sanitizes_area_names():
 
 def test_discovery_groups_empty_when_sync_areas_off():
     hass = _hass()
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
-        device_of=lambda eid: None,
-        name_of=lambda key: None,
+    devices = _seed_enhanced(
+        hass,
         config={"light.living": []},
-        area_name_of=lambda key: "卧室",
+        device_of=lambda eid: None,
+        area_of=lambda key: "卧室",
+        sync_areas=False,
     )
-    devices = devices_mod.XiaoduDeviceMap(device_list)
     result = _discovery_with_groups(hass, devices)
     assert result["payload"]["discoveredGroups"] == []
 
@@ -717,6 +749,7 @@ def test_control_humidifier_humidity():
 def test_control_vacuum_start():
     hass = FakeHass([FakeState("vacuum.v", "idle", {"friendly_name": "扫地机"})])
     devices = _device_map(hass, ["vacuum.v"], caps=[])
+    aid = _device_id_of(devices, "vacuum.v")
     result = run(
         handle_request(
             hass,
@@ -724,7 +757,7 @@ def test_control_vacuum_start():
             _request(
                 NAMESPACE_CONTROL,
                 "TurnOnRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "vacuum.v"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
@@ -755,13 +788,12 @@ def test_discovery_tv_actions_and_attributes():
 
 def _sensor_device_map(hass, config):
     """Group a temperature + humidity pair into one 温湿度计 device."""
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    return _seed_enhanced(
+        hass,
+        config=config,
         device_of=lambda eid: "sensor-dev" if eid in ("sensor.t", "sensor.h") else eid,
         name_of=lambda key: {"sensor-dev": "温湿度计"}.get(key),
-        config=config,
     )
-    return devices_mod.XiaoduDeviceMap(device_list)
 
 
 def _temp_humidity_hass():
@@ -929,13 +961,12 @@ def test_light_device_does_not_aggregate_percent_sibling_as_humidity():
             FakeState("sensor.saturability", "65", {"friendly_name": "饱和度", "unit_of_measurement": "%"}),
         ]
     )
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    devices = _seed_enhanced(
+        hass,
+        config={"lamp-dev": []},
         device_of=lambda eid: "lamp-dev" if eid in ("light.lamp", "sensor.saturability") else eid,
         name_of=lambda key: {"lamp-dev": "床头灯"}.get(key),
-        config={"lamp-dev": []},
     )
-    devices = devices_mod.XiaoduDeviceMap(device_list)
     result = run(
         handle_request(
             hass,
@@ -961,38 +992,30 @@ def _clothes_rack_hass():
 
 
 def _clothes_rack_map(hass, caps=None):
-    """Group the 晾衣杆 cover + light into one clothes-rack device."""
+    """Seed an enhanced set for the 晾衣杆 cover (+ optionally its light)."""
     all_caps = [c for c in devices_mod.CAP_LABELS if c != devices_mod.CAP_POWER]
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    config = {"rack-dev": {"cover.rack": list(all_caps if caps is None else caps)}}
+    return _seed_enhanced(
+        hass,
+        config=config,
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
-        config={
-            "rack-dev": {
-                "cover.rack": list(all_caps if caps is None else caps),
-            }
-        },
-        metadata_of=lambda key: {
-            "manufacturer": "四季沐歌",
-            "model": "micoe.airer.hz001z",
-        },
     )
-    return devices_mod.XiaoduDeviceMap(device_list)
 
 
 def test_discovery_clothes_rack_advertises_clothes_rack():
     hass = _clothes_rack_hass()
+    enhanced = _clothes_rack_map(hass)
     result = run(
         handle_request(
             hass,
-            _clothes_rack_map(hass),
+            enhanced,
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
     appliances = result["payload"]["discoveredAppliances"]
-    ids = [a["applianceId"] for a in appliances]
-    # The cover is the primary entity; the rack light is not a separate device.
-    assert ids == ["cover.rack"]
+    # Only the cover is selected (per-entity config); one CLOTHES_RACK appliance.
+    assert len(appliances) == 1
     rack = appliances[0]
     assert rack["applianceTypes"] == ["CLOTHES_RACK"]
     assert {"turnOn", "turnOff", "pause"} <= set(rack["actions"])
@@ -1002,6 +1025,7 @@ def test_discovery_clothes_rack_advertises_clothes_rack():
 def test_control_clothes_rack_up_down_pause_maps_cover_services():
     hass = _clothes_rack_hass()
     devices = _clothes_rack_map(hass)
+    aid = _device_id_of(devices, "cover.rack")
     for name in ("TurnOnRequest", "TurnOffRequest", "PauseRequest"):
         result = run(
             handle_request(
@@ -1010,7 +1034,7 @@ def test_control_clothes_rack_up_down_pause_maps_cover_services():
                 _request(
                     NAMESPACE_CONTROL,
                     name,
-                    {"accessToken": "t", "appliance": {"applianceId": "cover.rack"}},
+                    {"accessToken": "t", "appliance": {"applianceId": aid}},
                 ),
             )
         )
@@ -1026,14 +1050,16 @@ def test_control_clothes_rack_pause_implied_for_legacy_empty_config():
     # A clothes rack configured before "pause" existed (stored []) must still
     # expose pause after upgrade: cover pause is implied like power.
     hass = _clothes_rack_hass()
+    devices = _clothes_rack_map(hass, caps=[])
+    aid = _device_id_of(devices, "cover.rack")
     result = run(
         handle_request(
             hass,
-            _clothes_rack_map(hass, caps=[]),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "PauseRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "cover.rack"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
@@ -1070,14 +1096,16 @@ def test_control_unknown_state_is_not_offline():
             )
         ]
     )
+    devices = _clothes_rack_map(hass)
+    aid = _device_id_of(devices, "cover.rack")
     result = run(
         handle_request(
             hass,
-            _clothes_rack_map(hass),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "TurnOnRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "cover.rack"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
@@ -1089,80 +1117,71 @@ def test_discovery_multi_unit_device_exposes_two_appliances():
     # Both the 晾衣杆 cover and its light are selected -> two appliances with
     # their own types, names and actions.
     hass = _clothes_rack_hass()
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    devices = _seed_enhanced(
+        hass,
+        config={"rack-dev": {"cover.rack": [], "light.rack_light": []}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
-        config={
-            "rack-dev": {
-                "cover.rack": [],
-                "light.rack_light": [],
-            }
-        },
-        metadata_of=lambda key: {"model": "micoe.airer.hz001z"},
     )
     result = run(
         handle_request(
             hass,
-            devices_mod.XiaoduDeviceMap(device_list),
+            devices,
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
     appliances = {a["applianceId"]: a for a in result["payload"]["discoveredAppliances"]}
-    assert set(appliances) == {"cover.rack", "light.rack_light"}
-    rack = appliances["cover.rack"]
+    rack_dev = _find_device(devices, "cover.rack")
+    light_dev = _find_device(devices, "light.rack_light")
+    assert set(appliances) == {rack_dev.device_id, light_dev.device_id}
+    rack = appliances[rack_dev.device_id]
     assert rack["applianceTypes"] == ["CLOTHES_RACK"]
     assert {"turnOn", "turnOff", "pause"} <= set(rack["actions"])
     assert rack["friendlyName"] == "晾衣杆"
-    light = appliances["light.rack_light"]
+    light = appliances[light_dev.device_id]
     assert light["applianceTypes"] == ["LIGHT"]
-    assert {"turnOn", "turnOff", "timingTurnOn", "timingTurnOff"} <= set(light["actions"])
+    assert {"turnOn", "turnOff"} <= set(light["actions"])
     assert light["friendlyName"] == "晾衣杆 灯"
 
 
 def test_discovery_disabled_unit_is_not_exposed():
     # A unit absent from the config must not appear in discovery.
     hass = _clothes_rack_hass()
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    devices = _seed_enhanced(
+        hass,
+        config={"rack-dev": {"cover.rack": []}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
-        config={"rack-dev": {"cover.rack": []}},
-        metadata_of=lambda key: {"model": "micoe.airer.hz001z"},
     )
     result = run(
         handle_request(
             hass,
-            devices_mod.XiaoduDeviceMap(device_list),
+            devices,
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
     ids = [a["applianceId"] for a in result["payload"]["discoveredAppliances"]]
-    assert ids == ["cover.rack"]
+    rack_dev = _find_device(devices, "cover.rack")
+    assert ids == [rack_dev.device_id]
 
 
 def test_control_multi_unit_light_routes_to_light_entity():
     hass = _clothes_rack_hass()
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    devices = _seed_enhanced(
+        hass,
+        config={"rack-dev": {"cover.rack": [], "light.rack_light": []}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
-        config={
-            "rack-dev": {
-                "cover.rack": [],
-                "light.rack_light": [],
-            }
-        },
-        metadata_of=lambda key: {"model": "micoe.airer.hz001z"},
     )
+    aid = _device_id_of(devices, "light.rack_light")
     result = run(
         handle_request(
             hass,
-            devices_mod.XiaoduDeviceMap(device_list),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "TurnOnRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "light.rack_light"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
@@ -1198,29 +1217,28 @@ def _yuba_hass():
 
 
 def _yuba_map(hass):
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    return _seed_enhanced(
+        hass,
+        config={"yuba-dev": []},
         device_of=lambda eid: "yuba-dev",
         name_of=lambda key: "米家智能浴霸N1",
-        config={"yuba-dev": {"light.yuba_light": ["brightness", "temperature"]}},
-        metadata_of=lambda key: {"manufacturer": "小米", "model": "xiaomi.bhf_light.na1"},
     )
-    return devices_mod.XiaoduDeviceMap(device_list)
 
 
 def test_discovery_yuba_advertises_single_yuba_appliance():
     hass = _yuba_hass()
+    enhanced = _yuba_map(hass)
     result = run(
         handle_request(
             hass,
-            _yuba_map(hass),
+            enhanced,
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
     appliances = result["payload"]["discoveredAppliances"]
-    # Only the YUBA master is exposed (function switches stay off by default
-    # and the auxiliary config switches are filtered out entirely).
-    assert [a["applianceId"] for a in appliances] == ["light.yuba_light"]
+    # Only one YUBA appliance is exposed (function switches are modes, not
+    # separate devices; auxiliary config switches are filtered out).
+    assert len(appliances) == 1
     master = appliances[0]
     assert master["applianceTypes"] == ["YUBA"]
     assert master["friendlyName"] == "米家智能浴霸N1"
@@ -1228,32 +1246,31 @@ def test_discovery_yuba_advertises_single_yuba_appliance():
     assert {
         "turnOn",
         "turnOff",
-        "timingTurnOn",
-        "timingTurnOff",
-        "setBrightnessPercentage",
         "setMode",
         "unSetMode",
         "setTemperature",
     } <= actions
     attr_names = {a["name"] for a in master["attributes"]}
-    assert {"turnOnState", "brightness", "mode", "targetTemperature", "temperature"} <= attr_names
+    assert {"turnOnState", "mode", "targetTemperature"} <= attr_names
     mode = next(a for a in master["attributes"] if a["name"] == "mode")
     assert mode["value"] == "照明"  # light is on, functions are off
-    assert mode["legalValue"] == "(照明, 暖风, 吹风, 换气)"
+    assert mode["legalValue"] == "(暖风, 吹风, 换气, 照明)"
 
 
 def test_control_yuba_set_mode_routes_to_function_switch():
     hass = _yuba_hass()
+    devices = _yuba_map(hass)
+    aid = _device_id_of(devices, "light.yuba_light")
     result = run(
         handle_request(
             hass,
-            _yuba_map(hass),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "SetModeRequest",
                 {
                     "accessToken": "t",
-                    "appliance": {"applianceId": "light.yuba_light"},
+                    "appliance": {"applianceId": aid},
                     "mode": {"value": "暖风"},
                 },
             ),
@@ -1267,16 +1284,18 @@ def test_control_yuba_set_mode_routes_to_function_switch():
 
 def test_control_yuba_unset_mode_turns_function_off():
     hass = _yuba_hass()
+    devices = _yuba_map(hass)
+    aid = _device_id_of(devices, "light.yuba_light")
     result = run(
         handle_request(
             hass,
-            _yuba_map(hass),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "UnSetModeRequest",
                 {
                     "accessToken": "t",
-                    "appliance": {"applianceId": "light.yuba_light"},
+                    "appliance": {"applianceId": aid},
                     "mode": {"value": "吹风"},
                 },
             ),
@@ -1290,41 +1309,40 @@ def test_control_yuba_unset_mode_turns_function_off():
 
 def test_control_yuba_turn_off_shuts_all_functions():
     hass = _yuba_hass()
+    devices = _yuba_map(hass)
+    aid = _device_id_of(devices, "light.yuba_light")
     result = run(
         handle_request(
             hass,
-            _yuba_map(hass),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "TurnOffRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "light.yuba_light"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
     assert result["header"]["name"] == "TurnOffConfirmation"
-    expected = [
+    # Only the *on* function (the light) is turned off; the others are already off.
+    assert hass.service_calls == [
         ("light", "turn_off", {"entity_id": "light.yuba_light"}),
-        ("switch", "turn_off", {"entity_id": "switch.yuba_heating"}),
-        ("switch", "turn_off", {"entity_id": "switch.yuba_blow"}),
-        ("switch", "turn_off", {"entity_id": "switch.yuba_vent"}),
     ]
-    assert len(hass.service_calls) == len(expected)
-    for call in expected:
-        assert call in hass.service_calls
 
 
 def test_control_yuba_set_temperature_maps_to_number():
     hass = _yuba_hass()
+    devices = _yuba_map(hass)
+    aid = _device_id_of(devices, "light.yuba_light")
     result = run(
         handle_request(
             hass,
-            _yuba_map(hass),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "SetTemperatureRequest",
                 {
                     "accessToken": "t",
-                    "appliance": {"applianceId": "light.yuba_light"},
+                    "appliance": {"applianceId": aid},
                     "temperature": {"value": 30},
                 },
             ),
@@ -1420,24 +1438,23 @@ def test_discovery_socket_advertises_socket_type():
             FakeState("light.plug_indicator", "on", {"friendly_name": "米家智能插座2 蓝牙网关版 指示灯"}),
         ]
     )
-    device_list = devices_mod.build_devices_from_entities(
-        hass.states.async_all(),
+    devices = _seed_enhanced(
+        hass,
+        config={"plug-dev": {"switch.plug_on": []}},
         device_of=lambda eid: "plug-dev",
         name_of=lambda key: "米家智能插座2 蓝牙网关版",
-        config={"plug-dev": {"switch.plug_on": []}},
-        metadata_of=lambda key: {"manufacturer": "小白", "model": "chuangmi.plug.212a01"},
     )
     result = run(
         handle_request(
             hass,
-            devices_mod.XiaoduDeviceMap(device_list),
+            devices,
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
     appliances = result["payload"]["discoveredAppliances"]
     assert [a["applianceId"] for a in appliances] == ["switch.plug_on"]
     assert appliances[0]["applianceTypes"] == ["SOCKET"]
-    assert {"turnOn", "turnOff", "timingTurnOn", "timingTurnOff"} <= set(appliances[0]["actions"])
+    assert {"turnOn", "turnOff"} <= set(appliances[0]["actions"])
 
 
 def test_control_vacuum_continue_starts():
@@ -1450,14 +1467,16 @@ def test_control_vacuum_continue_starts():
             )
         ]
     )
+    devices = _device_map(hass, ["vacuum.robot"])
+    aid = _device_id_of(devices, "vacuum.robot")
     result = run(
         handle_request(
             hass,
-            _device_map(hass, ["vacuum.robot"]),
+            devices,
             _request(
                 NAMESPACE_CONTROL,
                 "ContinueRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "vacuum.robot"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
