@@ -25,9 +25,7 @@ _spec.loader.exec_module(_module)
 build_change_report = _module.build_change_report
 changed_attribute_names = _module.changed_attribute_names
 report_changed_attribute = _module.report_changed_attribute
-unit_has_control_capabilities = _module.unit_has_control_capabilities
 DUEROS_CHANGE_REPORT_URL = _module.DUEROS_CHANGE_REPORT_URL
-
 
 class _FakeResponse:
     status = 200
@@ -44,7 +42,6 @@ class _FakeResponse:
     async def __aexit__(self, *args):
         return False
 
-
 class _FakeSession:
     def __init__(self, msg="update 1 attributes"):
         self.posts = []
@@ -54,10 +51,8 @@ class _FakeSession:
         self.posts.append((url, json))
         return _FakeResponse(self._msg)
 
-
 class _Entry:
     data = {"bot_id": "bot-1"}
-
 
 class _Store:
     def __init__(self, open_uids=("open-1", "open-2")):
@@ -66,10 +61,8 @@ class _Store:
     def open_uids(self):
         return list(self._open_uids)
 
-
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
-
 
 def test_build_change_report_shape():
     report = build_change_report(
@@ -90,37 +83,22 @@ def test_build_change_report_shape():
         },
     }
 
-
 def test_build_change_report_generates_message_id():
     report = build_change_report("bot-1", "open-1", "light.bedroom", "turnOnState")
     assert report["header"]["messageId"]
     assert report["payload"]["appliance"]["attributeName"] == "turnOnState"
-
 
 def test_changed_attribute_names_diffs_values_and_new_names():
     old = {"turnOnState": "ON", "brightness": "50.0"}
     new = {"turnOnState": "ON", "brightness": "80.0", "connectivity": "REACHABLE"}
     assert changed_attribute_names(old, new) == {"brightness", "connectivity"}
 
-
 def test_changed_attribute_names_ignores_identical_values():
     snapshot = {"turnOnState": "ON", "brightness": "50.0"}
     assert changed_attribute_names(snapshot, dict(snapshot)) == set()
 
-
 def test_changed_attribute_names_no_previous_snapshot():
     assert changed_attribute_names(None, {"brightness": "10.0"}) == set()
-
-
-class _Unit:
-    def __init__(self, enabled):
-        self.enabled = frozenset(enabled)
-
-
-def test_unit_control_capability_detection():
-    assert unit_has_control_capabilities(_Unit(["power", "brightness"])) is True
-    assert unit_has_control_capabilities(_Unit(["temperature", "humidity"])) is False
-
 
 def test_report_pushes_one_request_per_open_uid():
     session = _FakeSession()
@@ -137,7 +115,6 @@ def test_report_pushes_one_request_per_open_uid():
         assert payload["payload"]["appliance"]["attributeName"] == "brightness"
     assert {p[1]["payload"]["openUid"] for p in session.posts} == {"open-1", "open-2"}
 
-
 def test_report_skips_without_bot_id():
     session = _FakeSession()
     entry = _Entry()
@@ -149,7 +126,6 @@ def test_report_skips_without_bot_id():
     )
     assert session.posts == []
 
-
 def test_report_skips_without_bound_users():
     session = _FakeSession()
     accepted = _run(
@@ -159,7 +135,6 @@ def test_report_skips_without_bound_users():
     )
     assert session.posts == []
     assert accepted is False
-
 
 def test_report_returns_false_when_rate_limited():
     session = _FakeSession(msg="One attribute can only sync 1 times during 60")
