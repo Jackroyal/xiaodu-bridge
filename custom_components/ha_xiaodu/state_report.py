@@ -37,7 +37,6 @@ from .const import (
     CONF_BOT_ID,
     DUEROS_CHANGE_REPORT_URL,
 )
-from .devices import CONTROL_CAPS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +53,6 @@ CONTROL_SUPPRESS_SECONDS = 3.0
 # ("One attribute can only sync 1 times during 60"). Keep a small margin so
 # server-side clock differences do not cause a rejection.
 ATTR_SYNC_COOLDOWN_SECONDS = 62.0
-
 
 def build_change_report(
     bot_id: str,
@@ -81,7 +79,6 @@ def build_change_report(
         },
     }
 
-
 def changed_attribute_names(
     old_attributes: dict[str, Any] | None,
     new_attributes: dict[str, Any],
@@ -94,18 +91,6 @@ def changed_attribute_names(
         for name, value in new_attributes.items()
         if name not in old_attributes or old_attributes[name] != value
     }
-
-
-def unit_has_control_capabilities(unit: Any) -> bool:
-    """Return True when the unit exposes at least one control capability.
-
-    DuerOS rejects changereport for appliances without control actions
-    (pure sensor devices: ``actions: []``) with "Appliance specificed not
-    exist", even though the same appliance appears in discovery and works for
-    live queries. Only push state reports for units DuerOS actually accepts.
-    """
-    return bool(set(getattr(unit, "enabled", ())) & CONTROL_CAPS)
-
 
 async def report_changed_attribute(
     hass: HomeAssistant,
@@ -166,7 +151,6 @@ async def report_changed_attribute(
         except Exception:  # noqa: BLE001 - a failed push must not break the flow
             _LOGGER.warning("Xiaodu state report failed: %s", payload, exc_info=True)
     return accepted
-
 
 class StateReportManager:
     """Listen for exposed-device state changes and push changereports.
@@ -458,5 +442,4 @@ class StateReportManager:
             )
             if accepted:
                 self._last_sync[(device_id, attribute_name)] = time.monotonic()
-
 

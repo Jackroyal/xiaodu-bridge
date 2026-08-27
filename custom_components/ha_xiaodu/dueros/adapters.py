@@ -652,7 +652,7 @@ class VacuumAdapter(_PowerDeviceAdapter):
 # --- YUBA (浴霸) ------------------------------------------------------------
 
 # Mode value (reported in the ``mode`` attribute legalValue) -> semantic
-# control name on the device (see ``XiaoduDevice.controls``).
+# control name on the DuerDevice (see ``dueros.profiles`` YUBA profile).
 _YUBA_MODES: tuple[tuple[str, str], ...] = (
     ("暖风", "heating"),
     ("吹风", "blow"),

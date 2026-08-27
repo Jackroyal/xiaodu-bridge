@@ -1,9 +1,9 @@
 """OAuth2 code/token store for the Xiaodu integration.
 
 Tokens issued to the Xiaodu skill are opaque random strings owned by this
-integration, NOT Home Assistant user tokens. The DuerOS endpoint (phase 3)
-validates requests against this store and only exposes entities allowed by
-the entry's EntityFilter, so even a leaked token cannot be used against the
+integration, NOT Home Assistant user tokens. The DuerOS endpoint validates
+requests against this store; exposure is limited to the devices enrolled via
+the integration options, so even a leaked token cannot be used against the
 Home Assistant API with user-level permissions (least privilege).
 
 Token lifecycle: access tokens last 7 days (sent with every DuerOS request);

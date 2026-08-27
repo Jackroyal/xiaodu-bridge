@@ -1,16 +1,15 @@
 """Pure-logic tests for the enhanced (device-center) runtime path.
 
 Exercises routing in ``protocol.handle_request`` when an ``EnhancedDeviceSet`` is
-present in ``hass.data``: discovery merges enhanced + legacy (legacy skips
-claimed entities), control/query route enhanced appliance ids to the new path.
+present in ``hass.data``: discovery / control / query all resolve against the
+semantic model (the legacy per-entity path is removed).
 """
 
 import asyncio
 
-from tests._dueros_loader import load_devices, load_enhanced
+from tests._dueros_loader import load_enhanced
 
 protocol, enhanced_mod = load_enhanced()
-devices_mod = load_devices()
 
 NAMESPACE_DISCOVERY = protocol.NAMESPACE_DISCOVERY
 NAMESPACE_CONTROL = protocol.NAMESPACE_CONTROL
@@ -18,14 +17,12 @@ NAMESPACE_QUERY = protocol.NAMESPACE_QUERY
 DOMAIN = protocol.DOMAIN
 DATA_ENHANCED_DEVICES = protocol.DATA_ENHANCED_DEVICES
 
-
 class FakeState:
     def __init__(self, entity_id, state, attributes=None):
         self.entity_id = entity_id
         self.state = state
         self.domain = entity_id.split(".", 1)[0]
         self.attributes = attributes or {}
-
 
 class FakeStates:
     def __init__(self, states):
@@ -35,13 +32,11 @@ class FakeStates:
     def get(self, entity_id):
         return self._states.get(entity_id)
 
-
 class FakeServices:
     def __init__(self, hass):
         self._hass = hass
     async def async_call(self, domain, service, data, blocking=True):
         self._hass.service_calls.append((domain, service, data))
-
 
 class FakeHass:
     def __init__(self, states):
@@ -50,18 +45,14 @@ class FakeHass:
         self.services = FakeServices(self)
         self.data = {}
 
-
 def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
-
 
 def _header(ns, name):
     return {"namespace": ns, "name": name, "messageId": "msg-1", "payloadVersion": "1"}
 
-
 def _request(ns, name, payload):
     return {"header": _header(ns, name), "payload": payload}
-
 
 _YUBA = [
     FakeState("light.yuba", "on", {"friendly_name": "浴室浴霸"}),
@@ -71,17 +62,14 @@ _YUBA = [
     FakeState("select.warmth_level", "select", {"friendly_name": "热度档位", "option": "暖风"}),
 ]
 
-
 def _states():
     return list(_YUBA) + [FakeState("light.bedroom", "off", {"friendly_name": "卧室灯"})]
-
 
 def _device_of():
     yuba_ids = {s.entity_id for s in _YUBA}
     def fn(eid):
         return "yuba-device" if eid in yuba_ids else None
     return fn
-
 
 def _hass_with_enhanced():
     states = _states()
@@ -94,7 +82,6 @@ def _hass_with_enhanced():
     hass.data = {DOMAIN: {DATA_ENHANCED_DEVICES: enhanced}}
     return hass
 
-
 def _yuba_device(hass):
     """Return the enrolled YUBA DuerDevice (there may be other devices too)."""
     for d in hass.data[DOMAIN][DATA_ENHANCED_DEVICES].all():
@@ -102,21 +89,9 @@ def _yuba_device(hass):
             return d
     raise AssertionError("no YUBA device in enhanced set")
 
-
-def _legacy_map(hass):
-    return devices_mod.XiaoduDeviceMap(
-        devices_mod.build_devices_from_entities(
-            hass.states.async_all(),
-            device_of=_device_of(),
-            name_of=lambda k: {"yuba-device": "浴室浴霸"}.get(k),
-            config=None,
-        )
-    )
-
-
 def test_discovery_merges_enhanced_and_skips_legacy_yuba():
     hass = _hass_with_enhanced()
-    resp = run(protocol.handle_request(hass, _legacy_map(hass), _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {})))
+    resp = run(protocol.handle_request(hass, None, _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {})))
     appliances = resp["payload"]["discoveredAppliances"]
     ids = {a["applianceId"] for a in appliances}
     # enhanced yuba present (hash id) ...
@@ -131,18 +106,16 @@ def test_discovery_merges_enhanced_and_skips_legacy_yuba():
     assert "setGear" in enhanced_yuba[0]["actions"]
     assert enhanced_yuba[0]["applianceTypes"] == ["YUBA"]
 
-
 def test_control_turn_off_fans_out_to_enhanced_yuba():
     hass = _hass_with_enhanced()
     device = _yuba_device(hass)
     req = _request(NAMESPACE_CONTROL, "TurnOffRequest", {"appliance": {"applianceId": device.device_id}})
-    resp = run(protocol.handle_request(hass, _legacy_map(hass), req))
+    resp = run(protocol.handle_request(hass, None, req))
     assert resp["header"]["name"] == "TurnOffConfirmation"
     # heating + light are on -> both turned off (their own domains).
     calls = sorted((d, s) for d, s, _ in hass.service_calls)
     assert ("light", "turn_off") in calls
     assert ("switch", "turn_off") in calls
-
 
 def test_control_set_mode_targets_function_switch():
     hass = _hass_with_enhanced()
@@ -151,25 +124,23 @@ def test_control_set_mode_targets_function_switch():
         "appliance": {"applianceId": device.device_id},
         "mode": {"value": "吹风"},
     })
-    resp = run(protocol.handle_request(hass, _legacy_map(hass), req))
+    resp = run(protocol.handle_request(hass, None, req))
     assert resp["header"]["name"] == "SetModeConfirmation"
     assert ("switch", "turn_on") in [(d, s) for d, s, _ in hass.service_calls]
     # The turn_on should target switch.blow.
     blow_call = [data for d, s, data in hass.service_calls if data.get("entity_id") == "switch.blow"]
     assert blow_call
 
-
 def test_query_get_state_returns_attributes():
     hass = _hass_with_enhanced()
     device = _yuba_device(hass)
     req = _request(NAMESPACE_QUERY, "GetState", {"appliance": {"applianceId": device.device_id}})
-    resp = run(protocol.handle_request(hass, _legacy_map(hass), req))
+    resp = run(protocol.handle_request(hass, None, req))
     attrs = resp["payload"]["attributes"]
     names = {a["name"] for a in attrs}
     assert "turnOnState" in names
     assert "mode" in names
     assert "warmthLevel" in names
-
 
 def test_auto_detect_and_default_light_enrolled():
     # Default path: every device is enrolled (no feature flag).
@@ -191,6 +162,6 @@ def test_auto_detect_and_default_light_enrolled():
     # Discovery (enhanced-only) still emits the plain light.
     hass = FakeHass(states)
     hass.data = {DOMAIN: {DATA_ENHANCED_DEVICES: enhanced}}
-    resp = run(protocol.handle_request(hass, _legacy_map(hass), _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {})))
+    resp = run(protocol.handle_request(hass, None, _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {})))
     ids = {a["applianceId"] for a in resp["payload"]["discoveredAppliances"]}
     assert "light.bedroom" in ids
