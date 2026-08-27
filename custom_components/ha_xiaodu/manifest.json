@@ -6,12 +6,12 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "auth",
     "frontend",
     "http",
     "websocket_api"
   ],
   "documentation": "https://github.com/Jackroyal/ha-xiaodu",
-  "homeassistant": "2025.1.0",
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/Jackroyal/ha-xiaodu/issues",
