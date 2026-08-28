@@ -21,6 +21,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -30,6 +31,7 @@ from .const import (
     DATA_TIMER_MANAGER,
     DOMAIN,
 )
+
 from .oauth_server import (
     DATA_VIEWS_REGISTERED,
     XiaoduDuerOSServiceView,
@@ -39,6 +41,8 @@ from .oauth_server import (
 )
 from .state_report import StateReportManager
 from .timers import TimedServiceManager
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 
