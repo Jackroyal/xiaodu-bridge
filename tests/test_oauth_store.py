@@ -9,7 +9,7 @@ import time
 from importlib import util
 from pathlib import Path
 
-_BASE = Path(__file__).resolve().parents[1] / "custom_components" / "ha_xiaodu"
+_BASE = Path(__file__).resolve().parents[1] / "custom_components" / "xiaodu_bridge"
 
 
 def _load(name: str, filename: str):

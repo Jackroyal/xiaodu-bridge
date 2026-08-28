@@ -1,6 +1,6 @@
 {
-  "domain": "ha_xiaodu",
-  "name": "xiaodu",
+  "domain": "xiaodu_bridge",
+  "name": "xiaodu bridge",
   "codeowners": [
     "@Jackroyal"
   ],
@@ -11,11 +11,11 @@
     "http",
     "websocket_api"
   ],
-  "documentation": "https://github.com/Jackroyal/ha-xiaodu",
+  "documentation": "https://github.com/Jackroyal/xiaodu-bridge",
   "integration_type": "hub",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/Jackroyal/ha-xiaodu/issues",
+  "issue_tracker": "https://github.com/Jackroyal/xiaodu-bridge/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.9.2"
+  "version": "0.9.3"
 }

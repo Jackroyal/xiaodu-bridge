@@ -8,7 +8,7 @@ from pathlib import Path
 from tests._dueros_loader import load_dueros
 
 ROOT = Path(__file__).resolve().parents[1]
-_XIAODU = ROOT / "custom_components" / "ha_xiaodu"
+_XIAODU = ROOT / "custom_components" / "xiaodu_bridge"
 
 # Load the protocol stack first (registers the synthetic ``xiaodu`` package),
 # then load state_report.py standalone.

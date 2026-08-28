@@ -1,6 +1,6 @@
 """Constants for the DuerOS Connected Home protocol.
 
-Kept separate from ``custom_components.ha_xiaodu.const`` so the protocol layer
+Kept separate from ``custom_components.xiaodu_bridge.const`` so the protocol layer
 has no dependency on integration-level configuration keys.
 """
 

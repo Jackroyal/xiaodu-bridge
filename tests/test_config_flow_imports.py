@@ -13,8 +13,8 @@ from importlib import util
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
-_CONFIG_FLOW = _ROOT / "custom_components" / "ha_xiaodu" / "config_flow.py"
-_CONST = _ROOT / "custom_components" / "ha_xiaodu" / "const.py"
+_CONFIG_FLOW = _ROOT / "custom_components" / "xiaodu_bridge" / "config_flow.py"
+_CONST = _ROOT / "custom_components" / "xiaodu_bridge" / "const.py"
 
 
 def _load_const() -> object:

@@ -1,7 +1,7 @@
 {
   "config": {
     "abort": {
-      "already_configured": "小度集成已配置。",
+      "already_configured": "xiaodu bridge 集成已配置。",
       "reconfigure_successful": "配置已更新成功。"
     },
     "error": {

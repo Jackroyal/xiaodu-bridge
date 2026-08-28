@@ -1,16 +1,22 @@
-# Home Assistant Custom Integration: xiaodu
+# Home Assistant Custom Integration: xiaodu bridge
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Hassfest](https://github.com/Jackroyal/ha-xiaodu/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Jackroyal/ha-xiaodu/actions/workflows/hassfest.yml)
-[![HACS Validation](https://github.com/Jackroyal/ha-xiaodu/actions/workflows/hacs.yml/badge.svg)](https://github.com/Jackroyal/ha-xiaodu/actions/workflows/hacs.yml)
+[![Hassfest](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml)
+[![HACS Validation](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml)
 
 让 Home Assistant 中的设备被小度音箱 / 小度 App 发现、查询与控制。
+
+> **名称说明**：本集成的商店名称为 `xiaodu bridge`，domain 为 `xiaodu_bridge`
+> （仓库也已更名为 `xiaodu-bridge`）。方向是 **Home Assistant → 小度**：HA 里的实体被
+> 映射成 DuerOS 语义设备，交给小度音箱/App 控制。它与「把小度生态里的设备
+> 反向导入 HA」类集成（例如 cookie 轮询 `xiaodu.baidu.com` 的方案）方向相反、
+> 实现互不相关，两者可以同时安装、互不冲突（domain 不同）。
 
 本集成作为 **DuerOS 智能家居 OAuth 服务端**运行：小度是 OAuth 客户端，集成通过
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.2**。
+当前集成版本：**v0.9.3**。
 
 ## 功能
 
@@ -44,8 +50,8 @@
 1. 确认已安装 [HACS](https://hacs.xyz)。
 2. 打开 **HACS → Integrations**。
 3. 选择 **Explore & Download Repositories**。
-4. 搜索 **xiaodu**，或先添加本仓库为 Custom Repository：
-   `https://github.com/Jackroyal/ha-xiaodu`，类别选择 **Integration**。
+4. 搜索 **xiaodu bridge**，或先添加本仓库为 Custom Repository：
+   `https://github.com/Jackroyal/xiaodu-bridge`，类别选择 **Integration**。
 5. 下载后重启 Home Assistant。
 
 > 小度为限定地区的平台，`hacs.json` 中已设置 `country: CN`：只有 HACS 的
@@ -54,13 +60,13 @@
 
 ### 手动安装
 
-把仓库中的 `custom_components/ha_xiaodu` 目录复制到：
+把仓库中的 `custom_components/xiaodu_bridge` 目录复制到：
 
 ```text
-/config/custom_components/ha_xiaodu
+/config/custom_components/xiaodu_bridge
 ```
 
-重启 Home Assistant 后，进入 **设置 → 设备与服务 → 添加集成**，搜索 **xiaodu**。
+重启 Home Assistant 后，进入 **设置 → 设备与服务 → 添加集成**，搜索 **xiaodu bridge**。
 
 ## 配置集成
 
@@ -123,7 +129,7 @@ Home Assistant :8123
 ```text
 .
 ├── .github/workflows/          # Hassfest 与 HACS 校验
-├── custom_components/ha_xiaodu/
+├── custom_components/xiaodu_bridge/
 │   ├── __init__.py             # 集成入口 / unload / 中枢设备注册
 │   ├── config_flow.py          # 配置流与设备 → 能力选项流
 │   ├── devices.py              # 设备、域与能力辅助
@@ -163,7 +169,7 @@ pytest
 logger:
   default: warning
   logs:
-    custom_components.ha_xiaodu: debug
+    custom_components.xiaodu_bridge: debug
 ```
 
 集成会记录 OAuth 与 WebService 请求的耗时、动作、结果和 HTTP 状态；不要把 token、

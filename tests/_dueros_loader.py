@@ -1,6 +1,6 @@
 """Load the DuerOS protocol + device model without importing homeassistant.
 
-Importing ``custom_components.ha_xiaodu`` executes its ``__init__.py``, which
+Importing ``custom_components.xiaodu_bridge`` executes its ``__init__.py``, which
 pulls in homeassistant. The protocol/device layers only import HA under
 TYPE_CHECKING, so we can load them standalone for pure-logic tests.
 
@@ -16,7 +16,7 @@ import types
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
-_XIAODU = _ROOT / "custom_components" / "ha_xiaodu"
+_XIAODU = _ROOT / "custom_components" / "xiaodu_bridge"
 
 
 def _load_module(modname: str, filename: Path) -> types.ModuleType:
