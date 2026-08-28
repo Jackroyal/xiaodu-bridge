@@ -48,6 +48,10 @@
    `https://github.com/Jackroyal/ha-xiaodu`，类别选择 **Integration**。
 5. 下载后重启 Home Assistant。
 
+> 小度为限定地区的平台，`hacs.json` 中已设置 `country: CN`：只有 HACS 的
+> 国家/地区设置为 **China** 或 **All** 时才会显示本仓库。若未看到，可在
+> **HACS → Settings → Country** 改为 **All**，或直接使用下面的手动安装方式。
+
 ### 手动安装
 
 把仓库中的 `custom_components/ha_xiaodu` 目录复制到：
