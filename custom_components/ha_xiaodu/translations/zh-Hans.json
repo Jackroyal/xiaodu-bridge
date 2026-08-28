@@ -17,7 +17,7 @@
           "client_id": "Client_Id",
           "client_secret": "ClientSecret",
           "redirect_uri": "回调地址（小度平台生成，不可修改）",
-          "public_url": "公网访问地址（例如 https://ha.example.com:8123）",
+          "public_url": "公网访问地址（HTTPS）",
           "bot_id": "小度技能ID（botId，控制台基础信息页可见）"
         }
       },
@@ -32,7 +32,7 @@
           "client_id": "Client_Id",
           "client_secret": "ClientSecret",
           "redirect_uri": "回调地址（小度平台生成，不可修改）",
-          "public_url": "公网访问地址（例如 https://ha.example.com:8123）",
+          "public_url": "公网访问地址（HTTPS）",
           "bot_id": "小度技能ID（botId，控制台基础信息页可见）"
         }
       }
