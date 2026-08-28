@@ -23,3 +23,5 @@ outputs/
 # Local agent workflow docs (not published)
 AGENTS.md
 COMMITTING.md
+BLOG_PUBLISHING_WORKFLOW.md
+BLOG_WRITING_STYLE.md
