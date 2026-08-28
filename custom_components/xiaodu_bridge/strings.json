@@ -1,7 +1,7 @@
 {
   "config": {
     "abort": {
-      "already_configured": "xiaodu is already configured.",
+      "already_configured": "xiaodu bridge is already configured.",
       "reconfigure_successful": "Configuration updated successfully."
     },
     "error": {

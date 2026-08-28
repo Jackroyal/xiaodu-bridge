@@ -7,13 +7,13 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from custom_components.ha_xiaodu import (
+from custom_components.xiaodu_bridge import (
     async_remove_config_entry_device,
     _sync_device_registry,
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.ha_xiaodu.const import (
+from custom_components.xiaodu_bridge.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_DEVICES,

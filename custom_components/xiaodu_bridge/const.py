@@ -1,8 +1,8 @@
-"""Constants for the xiaodu integration."""
+"""Constants for the xiaodu bridge integration."""
 
 from __future__ import annotations
 
-DOMAIN = "ha_xiaodu"
+DOMAIN = "xiaodu_bridge"
 
 # Config entry data / options keys
 CONF_CLIENT_ID = "client_id"

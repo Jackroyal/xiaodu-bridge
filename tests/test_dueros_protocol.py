@@ -1357,7 +1357,7 @@ def test_control_yuba_set_temperature_maps_to_number():
 def test_control_timing_turn_off_schedules_persisted_call():
     hass = _hass()
     manager = FakeTimedManager()
-    hass.data["ha_xiaodu"] = {"timed_services": manager}
+    hass.data["xiaodu_bridge"] = {"timed_services": manager}
     now = time.time()
     result = run(
         handle_request(
@@ -1384,7 +1384,7 @@ def test_control_timing_turn_off_schedules_persisted_call():
 def test_control_timing_turn_on_schedules_persisted_call():
     hass = _hass()
     manager = FakeTimedManager()
-    hass.data["ha_xiaodu"] = {"timed_services": manager}
+    hass.data["xiaodu_bridge"] = {"timed_services": manager}
     now = time.time()
     result = run(
         handle_request(
@@ -1410,7 +1410,7 @@ def test_control_timing_turn_on_schedules_persisted_call():
 def test_control_timing_rejects_invalid_timestamp():
     hass = _hass()
     manager = FakeTimedManager()
-    hass.data["ha_xiaodu"] = {"timed_services": manager}
+    hass.data["xiaodu_bridge"] = {"timed_services": manager}
     result = run(
         handle_request(
             hass,

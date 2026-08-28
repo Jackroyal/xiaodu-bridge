@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-_ENVELOPE = ROOT / "custom_components" / "ha_xiaodu" / "dueros" / "dcs_envelope.py"
+_ENVELOPE = ROOT / "custom_components" / "xiaodu_bridge" / "dueros" / "dcs_envelope.py"
 
 spec = importlib.util.spec_from_file_location("dcs_envelope", _ENVELOPE)
 assert spec and spec.loader

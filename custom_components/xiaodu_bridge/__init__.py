@@ -1,4 +1,4 @@
-"""xiaodu integration for Home Assistant.
+"""xiaodu bridge integration for Home Assistant.
 
 This is a hub integration without entity platforms: it serves the OAuth2
 endpoints and the DuerOS smart-home WebService. The HTTP views are registered
@@ -47,7 +47,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _LOGGER = logging.getLogger(__name__)
 
 # Title shown on the integration page for this hub entry.
-ENTRY_TITLE = "xiaodu"
+ENTRY_TITLE = "xiaodu bridge"
 DEVICE_MANUFACTURER = "DuerOS"
 DEVICE_MODEL = "小度智能中枢"
 

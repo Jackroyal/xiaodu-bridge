@@ -15,7 +15,7 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.ha_xiaodu.const import (
+from custom_components.xiaodu_bridge.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_PUBLIC_URL,
@@ -71,7 +71,7 @@ async def test_options_flow_hub_menu(hass) -> None:
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
 
-    from custom_components.ha_xiaodu.const import CONF_DEVICES, CONF_SYNC_AREAS
+    from custom_components.xiaodu_bridge.const import CONF_DEVICES, CONF_SYNC_AREAS
     from tests.common import MockConfigEntry
 
     entry = MockConfigEntry(
