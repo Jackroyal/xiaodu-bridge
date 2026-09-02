@@ -84,6 +84,35 @@ def _payload_value(payload: dict[str, Any], key: str) -> Any:
     return node
 
 
+def _temperature_target_unit(hass: Any) -> str:
+    """The temperature unit Home Assistant is configured to display.
+
+    Read from ``hass.config.units.temperature_unit`` (the ``UnitSystem``
+    HA core exposes); returns ``""`` when unavailable so callers fall back to
+    the entity's own unit (e.g. in standalone tests without a HA runtime).
+    """
+    units = getattr(getattr(hass, "config", None), "units", None)
+    return getattr(units, "temperature_unit", "") if units is not None else ""
+
+
+def _convert_temperature(value: float, from_unit: str, to_unit: str) -> float:
+    """Convert a temperature value between °C and °F (no HA runtime import).
+
+    Kept to the degree-symbol forms HA uses (``°C`` / ``°F``); anything else
+    (e.g. ``℃``) passes through unchanged — the numeric value already matches
+    the token reported by :func:`_sensor_scale` then.
+    """
+    f = (from_unit or "").lower()
+    t = (to_unit or "").lower()
+    if not f or not t or f == t:
+        return value
+    if "f" in f and "c" in t:
+        return round((value - 32) * 5 / 9, 1)
+    if "c" in f and "f" in t:
+        return round(value * 9 / 5 + 32, 1)
+    return value
+
+
 def is_powered_on(state: Any) -> bool:
     """Return True when a HA entity is considered powered-on."""
     if state.domain == "climate":
@@ -281,11 +310,12 @@ def target_temperature_mapping(
         actions=(DuerAction(ACTION_SET_TEMPERATURE, capability_key, "temperature"),),
     )
 
-    def read(ctx: ReadContext) -> AttributeValue:
+    def read(ctx: ReadContext) -> AttributeValue | None:
         state = ctx.entities.get("value")
         value = _num(state.state if state else None)
-        return make_attribute(attribute_name, value if value is not None else 0.0,
-                              scale="CELSIUS", legal="DOUBLE")
+        if value is None:
+            return None
+        return make_attribute(attribute_name, value, scale="CELSIUS", legal="DOUBLE")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_TEMPERATURE:
@@ -383,11 +413,22 @@ def sensor_query_mapping(
         query_names=query_names,
     )
 
-    def read(ctx: ReadContext) -> AttributeValue:
+    def read(ctx: ReadContext) -> AttributeValue | None:
         state = ctx.entities.get("value")
         value = _num(state.state if state else None)
-        return make_attribute(attribute_name, value if value is not None else 0.0,
-                              scale=scale or unit, legal=legal)
+        if value is None:
+            # unknown / unavailable: omit the attribute instead of fabricating
+            # a numeric 0.0 against legalValue.
+            return None
+        scale_value = scale or unit
+        if capability_key == "temperature":
+            from_unit = str(state.attributes.get("unit_of_measurement") or "") if state else ""
+            target = _temperature_target_unit(ctx.hass)
+            if from_unit and target and from_unit.lower() != target.lower():
+                value = _convert_temperature(value, from_unit, target)
+                t = target.lower()
+                scale_value = "CELSIUS" if "c" in t else ("FAHRENHEIT" if "f" in t else scale_value)
+        return make_attribute(attribute_name, value, scale=scale_value, legal=legal)
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read)
 
@@ -770,10 +811,12 @@ def climate_temperature_mapping(
         actions=(DuerAction(ACTION_SET_TEMPERATURE, "targetTemperature", "temperature"),),
     )
 
-    def read(ctx: ReadContext) -> AttributeValue:
+    def read(ctx: ReadContext) -> AttributeValue | None:
         state = ctx.entities.get("value")
         value = _num(state.attributes.get("temperature") if state else None)
-        return make_attribute(ATTR_TARGET_TEMPERATURE, value if value is not None else 0.0, scale="CELSIUS", legal="DOUBLE")
+        if value is None:
+            return None
+        return make_attribute(ATTR_TARGET_TEMPERATURE, value, scale="CELSIUS", legal="DOUBLE")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_TEMPERATURE:
@@ -802,10 +845,15 @@ def target_humidity_mapping(
         actions=(DuerAction(ACTION_SET_HUMIDITY, "targetHumidity", "humidity"),),
     )
 
-    def read(ctx: ReadContext) -> AttributeValue:
+    def read(ctx: ReadContext) -> AttributeValue | None:
         state = ctx.entities.get("value")
         value = _num(state.attributes.get("target_humidity") if state else None)
-        return make_attribute(ATTR_TARGET_HUMIDITY, value if value is not None else state.state if state else 0.0, scale="%", legal="[0, 100]")
+        if value is None:
+            # Off / not reported: the entity state string (e.g. "off") is not a
+            # numeric humidity. Serializing it would break legalValue [0, 100],
+            # so omit the attribute until a numeric target is available.
+            return None
+        return make_attribute(ATTR_TARGET_HUMIDITY, value, scale="%", legal="[0, 100]")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_HUMIDITY:
@@ -814,6 +862,46 @@ def target_humidity_mapping(
         if value is None:
             return None
         return [ServiceCall(domain, "set_humidity", {"humidity": int(value)}, entity_id)]
+
+    return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
+
+
+def humidifier_mode_mapping(
+    *,
+    entity_id: str,
+    appliance_types: tuple[str, ...],
+) -> CapabilityMapping:
+    """Humidifier operating mode (``setMode``) via ``humidifier.set_mode``.
+
+    Uses the HA ``humidifier`` domain's own ``mode`` / ``available_modes``
+    attributes and the ``humidifier.set_mode`` service (the domain's official
+    API), instead of routing through ``select.select_option`` like a generic
+    select entity (``humidifier.select_option`` does not exist). ``legalValue``
+    is derived from ``available_modes`` so Xiaodu knows the valid mode strings.
+    """
+    cap = DuerCapability(
+        "mode",
+        "模式",
+        kind=CAP_KIND_CONTROL,
+        appliance_types=appliance_types,
+        attributes=(DuerAttribute(ATTR_MODE, "string"),),
+        actions=(DuerAction(ACTION_SET_MODE, "mode", "mode"),),
+    )
+
+    def read(ctx: ReadContext) -> AttributeValue:
+        state = ctx.entities.get("value")
+        modes = list(state.attributes.get("available_modes") or ()) if state else []
+        mode = str(state.attributes.get("mode") or "") if state else ""
+        legal = "(" + ", ".join(str(m) for m in modes) + ")" if modes else ""
+        return make_attribute(ATTR_MODE, mode, legal=legal)
+
+    def write(ctx: WriteContext) -> list[ServiceCall] | None:
+        if ctx.action.name != ACTION_SET_MODE:
+            return None
+        value = _payload_value(ctx.payload, "mode")
+        if value is None:
+            return None
+        return [ServiceCall("humidifier", "set_mode", {"mode": str(value)}, entity_id)]
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
@@ -838,6 +926,7 @@ __all__ = [
     "climate_mode_mapping",
     "climate_temperature_mapping",
     "target_humidity_mapping",
+    "humidifier_mode_mapping",
 ]
 
 

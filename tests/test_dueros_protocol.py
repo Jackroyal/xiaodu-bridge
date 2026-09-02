@@ -130,6 +130,16 @@ def _device_map(hass, entity_ids=None, caps=None, name_of=None):
     return _seed_enhanced(hass, config=config, name_of=name_of)
 
 
+class FakeUnits:
+    def __init__(self, temperature_unit):
+        self.temperature_unit = temperature_unit
+
+
+class FakeConfig:
+    def __init__(self, temperature_unit):
+        self.units = FakeUnits(temperature_unit)
+
+
 def _hass():
     return FakeHass(
         [
@@ -746,6 +756,99 @@ def test_control_humidifier_humidity():
     ]
 
 
+def test_discovery_humidifier_omits_unknown_target_humidity():
+    # Regression from the real console packet: an off humidifier with no
+    # numeric target_humidity must not serialize the entity state string
+    # ("off") into the numeric attribute (legalValue [0, 100]).
+    hass = FakeHass(
+        [
+            FakeState(
+                "humidifier.h",
+                "off",
+                {
+                    "friendly_name": "米家纯净式智能加湿器",
+                    "mode": "",
+                    "available_modes": ["auto", "manual"],
+                },
+            )
+        ]
+    )
+    result = run(
+        handle_request(
+            hass,
+            _device_map(hass, ["humidifier.h"], caps=["targetHumidity", "mode"]),
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    names = [a["name"] for a in app["attributes"]]
+    assert "targetHumidity" not in names
+    assert "turnOnState" in names
+    mode_attr = next(a for a in app["attributes"] if a["name"] == "mode")
+    assert mode_attr["legalValue"] == "(auto, manual)"
+
+
+def test_discovery_humidifier_reports_numeric_target_humidity():
+    hass = FakeHass(
+        [
+            FakeState(
+                "humidifier.h",
+                "on",
+                {"friendly_name": "加湿器", "target_humidity": 60, "mode": "auto"},
+            )
+        ]
+    )
+    result = run(
+        handle_request(
+            hass,
+            _device_map(hass, ["humidifier.h"], caps=["targetHumidity", "mode"]),
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    target = next(a for a in app["attributes"] if a["name"] == "targetHumidity")
+    assert target["value"] == 60.0
+    assert target["scale"] == "%"
+
+
+def test_control_humidifier_mode():
+    # setMode must call humidifier.set_mode (not the nonexistent
+    # humidifier.select_option service the old select-mapping used).
+    hass = FakeHass(
+        [
+            FakeState(
+                "humidifier.h",
+                "on",
+                {
+                    "friendly_name": "加湿器",
+                    "mode": "auto",
+                    "available_modes": ["auto", "manual"],
+                },
+            )
+        ]
+    )
+    devices = _device_map(hass, ["humidifier.h"], caps=["targetHumidity", "mode"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetModeRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": "humidifier.h"},
+                    "mode": {"value": "manual"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "SetModeConfirmation"
+    assert hass.service_calls == [
+        ("humidifier", "set_mode", {"entity_id": "humidifier.h", "mode": "manual"})
+    ]
+
+
 def test_control_vacuum_start():
     hass = FakeHass([FakeState("vacuum.v", "idle", {"friendly_name": "扫地机"})])
     devices = _device_map(hass, ["vacuum.v"], caps=[])
@@ -1144,12 +1247,38 @@ def test_discovery_multi_unit_device_exposes_two_appliances():
     assert light["friendlyName"] == "晾衣杆 灯"
 
 
-def test_discovery_disabled_unit_is_not_exposed():
-    # A unit absent from the config must not appear in discovery.
+def test_discovery_legacy_default_all_config_surfaces_leftover_light():
+    # A legacy per-entity dict that only lists the cover with an empty (all)
+    # list means "device enabled, default-all": the unclaimed light must
+    # surface as its own LIGHT appliance instead of being silently dropped.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
         config={"rack-dev": {"cover.rack": []}},
+        device_of=lambda eid: "rack-dev",
+        name_of=lambda key: "晾衣杆",
+    )
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    appl = {a["applianceTypes"][0]: a for a in result["payload"]["discoveredAppliances"]}
+    assert set(appl) == {"CLOTHES_RACK", "LIGHT"}
+    assert {"turnOn", "turnOff", "pause"} <= set(appl["CLOTHES_RACK"]["actions"])
+    assert {"turnOn", "turnOff"} <= set(appl["LIGHT"]["actions"])
+    assert appl["LIGHT"]["friendlyName"] == "晾衣杆 灯"
+
+
+def test_discovery_legacy_narrowed_config_keeps_unlisted_entities_hidden():
+    # A legacy per-entity dict with an explicit (non-empty) selection keeps the
+    # per-entity opt-in: an entity absent from the dict must not be exposed.
+    hass = _clothes_rack_hass()
+    devices = _seed_enhanced(
+        hass,
+        config={"rack-dev": {"cover.rack": ["percentage"]}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
     )
@@ -1225,7 +1354,7 @@ def _yuba_map(hass):
     )
 
 
-def test_discovery_yuba_advertises_single_yuba_appliance():
+def test_discovery_yuba_advertises_yuba_plus_separate_light():
     hass = _yuba_hass()
     enhanced = _yuba_map(hass)
     result = run(
@@ -1236,11 +1365,10 @@ def test_discovery_yuba_advertises_single_yuba_appliance():
         )
     )
     appliances = result["payload"]["discoveredAppliances"]
-    # Only one YUBA appliance is exposed (function switches are modes, not
-    # separate devices; auxiliary config switches are filtered out).
-    assert len(appliances) == 1
-    master = appliances[0]
-    assert master["applianceTypes"] == ["YUBA"]
+    # Function switches are modes (not separate devices); auxiliary config
+    # switches are filtered out; the bathroom light is its own LIGHT device.
+    assert len(appliances) == 2
+    master = next(a for a in appliances if a["applianceTypes"] == ["YUBA"])
     assert master["friendlyName"] == "米家智能浴霸N1"
     actions = set(master["actions"])
     assert {
@@ -1253,14 +1381,16 @@ def test_discovery_yuba_advertises_single_yuba_appliance():
     attr_names = {a["name"] for a in master["attributes"]}
     assert {"turnOnState", "mode", "targetTemperature"} <= attr_names
     mode = next(a for a in master["attributes"] if a["name"] == "mode")
-    assert mode["value"] == "照明"  # light is on, functions are off
-    assert mode["legalValue"] == "(暖风, 吹风, 换气, 照明)"
+    assert mode["legalValue"] == "(暖风, 吹风, 换气)"
+    light = next(a for a in appliances if a["applianceTypes"] == ["LIGHT"])
+    assert light["friendlyName"] == "米家智能浴霸N1 灯"
+    assert {"turnOn", "turnOff", "setBrightnessPercentage"} <= set(light["actions"])
 
 
 def test_control_yuba_set_mode_routes_to_function_switch():
     hass = _yuba_hass()
     devices = _yuba_map(hass)
-    aid = _device_id_of(devices, "light.yuba_light")
+    aid = _device_id_of(devices, "switch.yuba_heating")
     result = run(
         handle_request(
             hass,
@@ -1285,7 +1415,7 @@ def test_control_yuba_set_mode_routes_to_function_switch():
 def test_control_yuba_unset_mode_turns_function_off():
     hass = _yuba_hass()
     devices = _yuba_map(hass)
-    aid = _device_id_of(devices, "light.yuba_light")
+    aid = _device_id_of(devices, "switch.yuba_blow")
     result = run(
         handle_request(
             hass,
@@ -1332,7 +1462,7 @@ def test_control_yuba_turn_off_shuts_all_functions():
 def test_control_yuba_set_temperature_maps_to_number():
     hass = _yuba_hass()
     devices = _yuba_map(hass)
-    aid = _device_id_of(devices, "light.yuba_light")
+    aid = _device_id_of(devices, "number.yuba_target_temp")
     result = run(
         handle_request(
             hass,
@@ -1482,3 +1612,149 @@ def test_control_vacuum_continue_starts():
     )
     assert result["header"]["name"] == "ContinueConfirmation"
     assert hass.service_calls == [("vacuum", "start", {"entity_id": "vacuum.robot"})]
+
+
+def test_discovery_version_uses_runtime_version():
+    """The runtime version (resolved at setup via HA's loader into hass.data)
+    is reported in the discovery payload."""
+    hass = FakeHass([FakeState("switch.plug", "on")])
+    hass.data.setdefault(protocol.DOMAIN, {})[protocol.DATA_VERSION] = "9.9.9"
+    enhanced = enhanced_mod.build_enhanced_device_set(
+        hass.states.async_all(),
+        {"devices": {"switch.plug": []}},
+        device_of=lambda eid: None,
+    )
+    result = run(
+        handle_request(
+            hass,
+            enhanced,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    assert app["version"] == "9.9.9"
+
+
+def test_discovery_version_placeholder_without_setup():
+    """Without a setup-injected version the payload falls back to 0.0.0."""
+    hass = FakeHass([FakeState("switch.plug", "on")])
+    enhanced = enhanced_mod.build_enhanced_device_set(
+        hass.states.async_all(),
+        {"devices": {"switch.plug": []}},
+        device_of=lambda eid: None,
+    )
+    result = run(
+        handle_request(
+            hass,
+            enhanced,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    assert app["version"] == "0.0.0"
+
+
+def test_discovery_sensor_device_includes_temp_enabled_under_sibling_entity():
+    # 真实场景回归：温湿度计设备组同时有 temperature + humidity 传感器实体，
+    # 用户在「设备与能力」里只在 humidity 实体下勾选了 ['temperature','humidity']。
+    # 温度能力归属于温度实体，但设备级应视为已启用，不能因为归属实体不在配置
+    # 列表里就被丢弃（否则发现报文只有 humidity，小度查不到温度）。
+    DEVICE = "sensordev"
+    states = [
+        FakeState(
+            "sensor.hum",
+            "42",
+            {"friendly_name": "湿度", "device_class": "humidity", "unit_of_measurement": "%"},
+        ),
+        FakeState(
+            "sensor.temp",
+            "23.5",
+            {"friendly_name": "温度", "device_class": "temperature", "unit_of_measurement": "°C"},
+        ),
+        FakeState(
+            "sensor.batt",
+            "80",
+            {"friendly_name": "电量", "device_class": "battery", "unit_of_measurement": "%"},
+        ),
+    ]
+
+    def device_of(entity_id):
+        return DEVICE if entity_id in ("sensor.hum", "sensor.temp", "sensor.batt") else None
+
+    config = {DEVICE: {"sensor.hum": ["temperature", "humidity"]}}
+    hass = FakeHass(states)
+    enhanced = _seed_enhanced(hass, config=config, device_of=device_of)
+    result = run(
+        handle_request(
+            hass,
+            enhanced,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    apps = result["payload"]["discoveredAppliances"]
+    sensor_app = next(a for a in apps if a["applianceTypes"] == ["SENSOR"])
+    names = [a["name"] for a in sensor_app["attributes"]]
+    assert "temperature" in names, f"温度能力被误过滤, attributes={names}"
+    assert "humidity" in names
+
+
+
+def test_discovery_sensor_omits_non_numeric_temperature():
+    # Regression from the deployed packet: 净水器 temperature=0.0 was a sensor
+    # in unknown/unavailable state reported as a fabricated numeric.
+    hass = FakeHass(
+        [
+            FakeState("sensor.temp", "unknown", {"friendly_name": "温度", "device_class": "temperature", "unit_of_measurement": "°C"}),
+        ]
+    )
+    result = run(
+        handle_request(
+            hass,
+            _device_map(hass, ["sensor.temp"]),
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    assert all(a["name"] != "temperature" for a in app["attributes"]), app["attributes"]
+
+
+def test_discovery_sensor_temperature_normalized_to_ha_unit():
+    # 78.8°F 实体 + hass.config.units 为 °C -> 26.0 CELSIUS
+    hass = FakeHass(
+        [
+            FakeState("sensor.temp_f", "78.8", {"friendly_name": "温湿度计", "device_class": "temperature", "unit_of_measurement": "°F"}),
+        ]
+    )
+    hass.config = FakeConfig("°C")
+    result = run(
+        handle_request(
+            hass,
+            _device_map(hass, ["sensor.temp_f"]),
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    attr = next(a for a in app["attributes"] if a["name"] == "temperature")
+    assert attr["value"] == 26.0
+    assert attr["scale"] == "CELSIUS"
+
+
+def test_discovery_sensor_temperature_normalized_to_fahrenheit():
+    # 26°C 实体 + hass.config.units 为 °F -> 78.8 FAHRENHEIT
+    hass = FakeHass(
+        [
+            FakeState("sensor.temp_c", "26", {"friendly_name": "温湿度计", "device_class": "temperature", "unit_of_measurement": "°C"}),
+        ]
+    )
+    hass.config = FakeConfig("°F")
+    result = run(
+        handle_request(
+            hass,
+            _device_map(hass, ["sensor.temp_c"]),
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    attr = next(a for a in app["attributes"] if a["name"] == "temperature")
+    assert attr["value"] == 78.8
+    assert attr["scale"] == "FAHRENHEIT"

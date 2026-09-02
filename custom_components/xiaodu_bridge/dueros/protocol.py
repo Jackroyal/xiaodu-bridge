@@ -19,11 +19,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
-from ..const import DATA_ENHANCED_DEVICES, DATA_STATE_REPORT_MANAGER, DATA_TIMER_MANAGER, DOMAIN
+from ..const import DATA_ENHANCED_DEVICES, DATA_STATE_REPORT_MANAGER, DATA_TIMER_MANAGER, DATA_VERSION, DOMAIN
 from .enhanced import EnhancedDeviceSet
 from .model import AttributeValue, DuerAction, ReadContext, WriteContext
 from .constants import (
-    APP_VERSION,
     ACTION_TIMING_TURN_OFF,
     ACTION_TIMING_TURN_ON,
     ACTION_TURN_OFF,
@@ -131,6 +130,10 @@ def _enhanced_groups(enhanced: Any) -> list[dict[str, Any]]:
 
 def _enhanced_discovery(hass: Any, enhanced: Any) -> list[dict[str, Any]]:
     """Build the ``discoveredAppliances`` entries for enhanced devices."""
+    # Runtime version resolved once at setup via HA's integration loader and
+    # stashed in hass.data. "0.0.0" can only appear if setup never injected
+    # it (requests cannot be served before setup completes).
+    app_version = hass.data.get(DOMAIN, {}).get(DATA_VERSION) or "0.0.0"
     appliances: list[dict[str, Any]] = []
     for device in enhanced.all():
         attrs = _enhanced_attribute_values(hass, device)[:10]
@@ -144,7 +147,7 @@ def _enhanced_discovery(hass: Any, enhanced: Any) -> list[dict[str, Any]]:
                 "isReachable": device.is_reachable,
                 "manufacturerName": "Home Assistant",
                 "modelName": device.profile_key,
-                "version": APP_VERSION,
+                "version": app_version,
                 "actions": device.actions(),
                 "attributes": attrs,
             }

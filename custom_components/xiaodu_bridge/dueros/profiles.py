@@ -214,20 +214,23 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
     """Assemble a bathroom heater into a single YUBA appliance.
 
     Roles:
-      heating / blow / ventilation / light   -> used for ``power`` and ``mode``
-      warmth_level                           -> ``warmthLevel`` via setGear
-      fan_speed                              -> ``fanSpeed`` via setFanSpeed
-      target_temperature                     -> ``targetTemperature`` via setTemperature
+      heating / blow / ventilation        -> used for ``power`` and ``mode``
+      warmth_level                        -> ``warmthLevel`` via setGear
+      fan_speed                           -> ``fanSpeed`` via setFanSpeed
+      target_temperature                  -> ``targetTemperature`` via setTemperature
+
+    The bathroom *light* is deliberately not claimed: DuerOS YUBA has no light
+    actions (brightness/color), so the light surfaces through the leftover
+    path as its own LIGHT appliance instead of being reduced to on/off.
     """
     heat = _suggest_role(ctx, "heating")
     blow = _suggest_role(ctx, "blow")
     vent = _suggest_role(ctx, "ventilation")
-    light = _suggest_role(ctx, "light")
     gear = _suggest_role(ctx, "warmth_level")
     fan = _suggest_role(ctx, "fan_speed")
     temp = _suggest_role(ctx, "target_temperature")
 
-    if not any((heat, blow, vent, light)):
+    if not any((heat, blow, vent)):
         return []
 
     appliance_types = ("YUBA",)
@@ -236,10 +239,10 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
     # power: on when any function is on; off turns all functions off.
     switch_roles = [
         (eid, role)
-        for eid, role in ((heat, "heating"), (blow, "blow"), (vent, "ventilation"), (light, "light"))
+        for eid, role in ((heat, "heating"), (blow, "blow"), (vent, "ventilation"))
         if eid
     ]
-    primary = light or heat or blow or vent
+    primary = heat or blow or vent
     if switch_roles:
         mappings.append(
             composite_power_mapping(
@@ -250,14 +253,13 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
             )
         )
 
-    # mode: N switch entities synthesise the active function (暖风/吹风/换气/照明).
+    # mode: N switch entities synthesise the active function (暖风/吹风/换气).
     mode_elems = [
         (label, role, eid)
         for label, role, eid in (
             ("暖风", "heating", heat),
             ("吹风", "blow", blow),
             ("换气", "ventilation", vent),
-            ("照明", "light", light),
         )
         if eid
     ]

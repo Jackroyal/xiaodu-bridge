@@ -44,3 +44,7 @@ CONF_SYNC_AREAS = "sync_areas"
 
 # Runtime state key for the enhanced device set.
 DATA_ENHANCED_DEVICES = "enhanced_devices"
+
+# Runtime state key for the packaged version (resolved once at setup via
+# ``homeassistant.loader.async_get_integration``; manifest is the source).
+DATA_VERSION = "version"

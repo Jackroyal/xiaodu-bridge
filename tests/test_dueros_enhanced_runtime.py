@@ -97,9 +97,11 @@ def test_discovery_merges_enhanced_and_skips_legacy_yuba():
     # enhanced yuba present (hash id) ...
     enhanced_yuba = [a for a in appliances if a["modelName"] == "YUBA" and a["applianceId"].startswith("dueros-")]
     assert enhanced_yuba
-    # ... and the legacy entity-id yuba units are NOT re-emitted (no duplicate).
-    assert "light.yuba" not in ids
+    # ... and the legacy entity-id yuba function switches are NOT re-emitted
+    # (no duplicate); the bathroom light is its own separate LIGHT device.
     assert "switch.heating" not in ids
+    light_app = [a for a in appliances if a["applianceTypes"] == ["LIGHT"] and a["applianceId"] == "light.yuba"]
+    assert light_app
     # legacy non-yuba device still present.
     assert "light.bedroom" in ids
     # enhanced yuba advertises the YUBA action set.
@@ -112,10 +114,11 @@ def test_control_turn_off_fans_out_to_enhanced_yuba():
     req = _request(NAMESPACE_CONTROL, "TurnOffRequest", {"appliance": {"applianceId": device.device_id}})
     resp = run(protocol.handle_request(hass, None, req))
     assert resp["header"]["name"] == "TurnOffConfirmation"
-    # heating + light are on -> both turned off (their own domains).
-    calls = sorted((d, s) for d, s, _ in hass.service_calls)
-    assert ("light", "turn_off") in calls
+    # heating is on -> turned off; the light is a separate device and must
+    # NOT be switched off together with the YUBA functions.
+    calls = [(d, s) for d, s, _ in hass.service_calls]
     assert ("switch", "turn_off") in calls
+    assert ("light", "turn_off") not in calls
 
 def test_control_set_mode_targets_function_switch():
     hass = _hass_with_enhanced()

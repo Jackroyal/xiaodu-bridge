@@ -1,6 +1,6 @@
 [project]
 name = "home-assistant-xiaodu-bridge"
-version = "0.9.3"
+version = "0.9.4"
 description = "Home Assistant custom integration: xiaodu bridge"
 requires-python = ">=3.12"
 
