@@ -1,6 +1,6 @@
 {
   "domain": "xiaodu_bridge",
-  "name": "xiaodu bridge",
+  "name": "Xiaodu Bridge",
   "codeowners": [
     "@Jackroyal"
   ],
@@ -17,5 +17,5 @@
   "issue_tracker": "https://github.com/Jackroyal/xiaodu-bridge/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.9.3"
+  "version": "0.9.4"
 }

@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 from ..const import CONF_DEVICES, CONF_SYNC_AREAS
 from .. import devices as device_mod
-from .defaults import build_default_devices
+from .defaults import _device_enabled, build_default_devices
 from .model import DeviceBuildContext, DuerDevice, DuerDeviceProfile
 from .profiles import register_default_profiles
 from .registry import REGISTRY
@@ -188,8 +188,13 @@ def build_enhanced_device_set(
                 break
 
         if matched:
-            # Entities the profile did not claim (e.g. a clothes-rack light)
-            # still surface through the generic builder as their own appliance.
+            # Entities the profile did not claim (e.g. a clothes-rack / YUBA
+            # light) still surface through the generic builder as their own
+            # appliance. A legacy per-entity dict whose entries are all default
+            # (empty list) means "device enabled, default-all" (the new options
+            # UI saves a flat device -> capabilities list), so leftover
+            # entities must not be silently dropped just because the legacy
+            # dict only lists the profile's own entities.
             leftover = [
                 s for s in group
                 if getattr(s, "entity_id", "") not in claimed
@@ -198,6 +203,9 @@ def build_enhanced_device_set(
                 and not device_mod._is_auxiliary(s)
             ]
             if leftover:
+                leftover_config = config_entry
+                if isinstance(config_entry, dict) and _device_enabled(config_entry) is None:
+                    leftover_config = None
                 first_name = (getattr(leftover[0], "attributes", None) or {}).get("friendly_name")
                 leftover_ctx = DeviceBuildContext(
                     hass=None,
@@ -206,7 +214,7 @@ def build_enhanced_device_set(
                     profile_key="",
                     domain=getattr(leftover[0], "domain", ""),
                     states=leftover,
-                    config=config_entry,
+                    config=leftover_config,
                 )
                 _collect(build_default_devices(leftover_ctx), config_entry, devices, claimed)
                 _record_area(start)

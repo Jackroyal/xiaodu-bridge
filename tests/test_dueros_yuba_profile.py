@@ -46,7 +46,9 @@ def test_build_yuba_creates_one_device_with_capabilities():
     dev = devs[0]
     assert dev.profile_key == "YUBA"
     assert dev.appliance_types == ("YUBA",)
-    assert dev.primary_entity_id == "light.yuba"
+    # The light is no longer claimed by the YUBA appliance: it surfaces as a
+    # separate LIGHT device via the leftover path.
+    assert dev.primary_entity_id == "switch.heating"
     keys = {c.key for c in dev.capabilities}
     # power / mode / warmthLevel / fanSpeed / targetTemperature all present.
     assert {"power", "mode", "warmthLevel", "fanSpeed", "targetTemperature"} <= keys
@@ -116,9 +118,9 @@ def test_yuba_off_turns_all_functions_off():
     off_ctx = __import__("types").SimpleNamespace(
         action=DuerAction("turnOff", "power"), payload={}, entities=entities)
     calls = power.write(off_ctx)
-    # heating + light are on -> both get turn_off.
-    assert sorted((c.target_entity_id, c.service) for c in calls) == [
-        ("light.yuba", "turn_off"), ("switch.heating", "turn_off")]
+    # heating is on; the light is no longer part of the YUBA power group.
+    assert [(c.target_entity_id, c.service) for c in calls] == [
+        ("switch.heating", "turn_off")]
 
 
 def test_match_role_suggestion_only():
@@ -134,3 +136,16 @@ def test_register_default_profiles_and_build_via_registry():
     dev = reg.build_device(_ctx())
     assert dev is not None and dev.profile_key == "YUBA"
     assert dev.device_id == make_device_id("YUBA", "ha-device-1")
+
+
+def test_build_yuba_leaves_light_unclaimed():
+    dev = build_yuba(_ctx())[0]
+    claimed = {
+        b.entity_id
+        for cap in dev.capabilities
+        for b in cap.bindings
+    }
+    assert "light.yuba" not in claimed
+    assert "switch.heating" in claimed
+    # YUBA actions no longer carry light-specific vocabulary.
+    assert "setBrightnessPercentage" not in set(dev.actions())

@@ -21,6 +21,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
@@ -29,6 +30,7 @@ from .const import (
     DATA_ENHANCED_DEVICES,
     DATA_STATE_REPORT_MANAGER,
     DATA_TIMER_MANAGER,
+    DATA_VERSION,
     DOMAIN,
 )
 
@@ -85,6 +87,15 @@ async def async_remove_config_entry_device(
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Xiaodu from a config entry."""
     data = hass.data.setdefault(DOMAIN, {})
+    # Resolve the packaged version through HA's integration loader (it caches
+    # the parsed manifest, so ``manifest.json`` stays the single source of
+    # truth). ``dueros.protocol._enhanced_discovery`` reads it from
+    # ``hass.data`` for the DuerOS discovery payload.
+    try:
+        integration = await async_get_integration(hass, DOMAIN)
+        data[DATA_VERSION] = integration.version
+    except Exception:  # noqa: BLE001 - version is cosmetic
+        _LOGGER.debug("Could not resolve xiaodu_bridge version", exc_info=True)
     # The device-center (semantic) device set is built lazily by the DuerOS
     # WebService on the first request (see dueros.protocol._get_enhanced) and
     # cached in ``hass.data``, so it always reflects devices loaded at that time.

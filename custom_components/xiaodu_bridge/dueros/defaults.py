@@ -26,11 +26,11 @@ from .composers import (
     color_mapping,
     color_temperature_mapping,
     fan_speed_mapping,
+    humidifier_mode_mapping,
     mute_mapping,
     pause_mapping,
     percentage_mapping,
     power_mapping,
-    select_mapping,
     sensor_query_mapping,
     target_humidity_mapping,
     volume_mapping,
@@ -95,6 +95,31 @@ def _enabled(config: Any, caps: frozenset[str]) -> frozenset[str]:
     if "power" in caps:
         out.add("power")
     return frozenset(out)
+
+
+def _device_enabled(config: Any) -> frozenset[str] | None:
+    """Device-level enabled capability set from a per-device CONF_DEVICES entry.
+
+    The legacy/migration per-entity dict shape may list a capability under any
+    of the device's entities (e.g. ``temperature`` ticked on the humidity
+    sibling). Capability aggregation (sensors) must therefore honor the device
+    union, not drop a capability because its *owning* entity is not the one the
+    user selected it under. ``None``/empty entry keeps every capability
+    (candidate / default view), mirroring :func:`_enabled`.
+    """
+    if config is None:
+        return None
+    if isinstance(config, dict):
+        if not config:
+            return None
+        selected: set[str] = set()
+        for caps in config.values():
+            sel = set(caps or ())
+            if not sel:
+                return None  # any default-all entity -> device default-all
+            selected |= sel
+        return frozenset(selected)
+    return None if not config else frozenset(config)
 
 
 def _includes(config: Any, entity_id: str) -> tuple[bool, Any]:
@@ -187,18 +212,16 @@ def _sensor_device(
     query_entities: dict[str, str],
 ) -> DuerDevice | None:
     """Build a read-only SENSOR appliance from aggregated query capabilities."""
+    device_enabled = _device_enabled(ctx.config)
     mappings = []
     entity_ids: set[str] = set()
     for capability, entity_id in query_entities.items():
         state = ctx.find_state(entity_id)
         if state is None:
             continue
-        include, per_entity = _includes(ctx.config, entity_id)
-        if not include:
-            continue
-        caps = device_mod.derive_capabilities(state)
-        enabled = _enabled(per_entity, caps)
-        if capability not in enabled:
+        # query_entities already derives each capability from its owning
+        # entity; only the device-level enablement gates aggregation.
+        if device_enabled is not None and capability not in device_enabled:
             continue
         mappings.append(_sensor_mapping(entity_id, capability, state, (APPLIANCE_SENSOR,)))
         entity_ids.add(entity_id)
@@ -268,16 +291,7 @@ def _control_mappings(
         if "targetHumidity" in caps:
             out.append(target_humidity_mapping(entity_id=entity_id, appliance_types=appliance_types))
         if "mode" in caps:
-            out.append(
-                select_mapping(
-                    entity_id=entity_id,
-                    attribute_name="mode",
-                    capability_key="mode",
-                    appliance_types=appliance_types,
-                    select_domain="humidifier",
-                    set_action="setMode",
-                )
-            )
+            out.append(humidifier_mode_mapping(entity_id=entity_id, appliance_types=appliance_types))
     return out
 
 
@@ -338,16 +352,12 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         if devices and query_entities:
             first = devices[0]
             added = []
+            device_enabled = _device_enabled(ctx.config)
             for capability, entity_id in query_entities.items():
                 state = ctx.find_state(entity_id)
                 if state is None:
                     continue
-                include, per_entity = _includes(ctx.config, entity_id)
-                if not include:
-                    continue
-                entity_caps = device_mod.derive_capabilities(state)
-                enabled = _enabled(per_entity, entity_caps)
-                if capability not in enabled:
+                if device_enabled is not None and capability not in device_enabled:
                     continue
                 added.append(_sensor_mapping(entity_id, capability, state, first.appliance_types))
             if added:

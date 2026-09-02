@@ -49,7 +49,6 @@ from .constants import (
     APPLIANCE_SWITCH,
     APPLIANCE_TV_SET,
     APPLIANCE_YUBA,
-    APP_VERSION,
 )
 
 def _now() -> int:
@@ -167,7 +166,9 @@ class XiaoduAdapter:
             "isReachable": _reachable(state),
             "manufacturerName": "Home Assistant",
             "modelName": "Xiaodu",
-            "version": APP_VERSION,
+            # Legacy-only path (no longer dispatched); the runtime reports
+            # hass.data[DOMAIN][DATA_VERSION] via the enhanced device set.
+            "version": "0.0.0",
             "actions": self.actions_for(state),
             "attributes": self.query_attributes(state, unit=unit, device=device),
         }
