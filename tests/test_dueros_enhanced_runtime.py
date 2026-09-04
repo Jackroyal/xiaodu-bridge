@@ -125,7 +125,7 @@ def test_control_set_mode_targets_function_switch():
     device = _yuba_device(hass)
     req = _request(NAMESPACE_CONTROL, "SetModeRequest", {
         "appliance": {"applianceId": device.device_id},
-        "mode": {"value": "吹风"},
+        "mode": {"value": "FAN"},
     })
     resp = run(protocol.handle_request(hass, None, req))
     assert resp["header"]["name"] == "SetModeConfirmation"

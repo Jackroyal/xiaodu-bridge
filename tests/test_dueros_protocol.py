@@ -732,6 +732,178 @@ def test_control_fan_speed():
     ]
 
 
+def _ac_state(entity_id="climate.ac", state="cool", fan_mode="60", temperature=25.0):
+    """A Midea-style AC climate entity (discrete fan_modes, no percentage)."""
+    return FakeState(
+        entity_id,
+        state,
+        {
+            "friendly_name": "空调",
+            "hvac_modes": ["off", "heat", "cool", "auto", "dry", "fan_only"],
+            "min_temp": 16.0,
+            "max_temp": 30.0,
+            "target_temp_step": 0.5,
+            "fan_modes": ["20", "40", "60", "80", "100", "102"],
+            "fan_mode": fan_mode,
+            "temperature": temperature,
+        },
+    )
+
+
+def test_discovery_climate_advertises_increment_and_decrement():
+    # The Xiaodu app's AC +/− steppers bind to the incremental actions; a
+    # device that only advertises set* gets greyed-out buttons.
+    hass = FakeHass([_ac_state()])
+    devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature", "fanSpeed"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    actions = set(app["actions"])
+    assert {
+        "setTemperature",
+        "incrementTemperature",
+        "decrementTemperature",
+        "setFanSpeed",
+        "incrementFanSpeed",
+        "decrementFanSpeed",
+    } <= actions
+    attr_names = {a["name"] for a in app["attributes"]}
+    assert "targetTemperature" in attr_names
+    assert "fanSpeed" in attr_names
+    fan = next(a for a in app["attributes"] if a["name"] == "fanSpeed")
+    # current fan_mode "60" is index 2 in the ordered mode list.
+    assert fan["value"] == 2
+
+
+def test_control_climate_increment_temperature():
+    hass = FakeHass([_ac_state(temperature=25.0)])
+    devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "IncrementTemperatureRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "deltaTemperature": {"value": 1},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "IncrementTemperatureConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_temperature", {"entity_id": "climate.ac", "temperature": 26.0})
+    ]
+
+
+def test_control_climate_decrement_temperature_defaults_to_entity_step():
+    # No delta in the payload: step by the climate's own target_temp_step.
+    hass = FakeHass([_ac_state(temperature=25.0)])
+    devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "DecrementTemperatureRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "DecrementTemperatureConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_temperature", {"entity_id": "climate.ac", "temperature": 24.5})
+    ]
+
+
+def test_control_climate_increment_fan_speed():
+    hass = FakeHass([_ac_state(fan_mode="60")])
+    devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "IncrementFanSpeedRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "deltaFanSpeed": {"value": 1},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "IncrementFanSpeedConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "80"})
+    ]
+
+
+def test_control_climate_decrement_fan_speed_clamps_at_lowest():
+    hass = FakeHass([_ac_state(fan_mode="20")])
+    devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "DecrementFanSpeedRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "DecrementFanSpeedConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "20"})
+    ]
+
+
+def test_control_climate_set_fan_speed_maps_index_to_mode():
+    hass = FakeHass([_ac_state(fan_mode="60")])
+    devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetFanSpeedRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "fanSpeed": {"value": 3},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "SetFanSpeedConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "80"})
+    ]
+
+
 def test_control_humidifier_humidity():
     hass = FakeHass([FakeState("humidifier.h", "on", {"friendly_name": "加湿器", "humidity": 50})])
     devices = _device_map(hass, ["humidifier.h"], caps=["targetHumidity"])
@@ -1381,7 +1553,7 @@ def test_discovery_yuba_advertises_yuba_plus_separate_light():
     attr_names = {a["name"] for a in master["attributes"]}
     assert {"turnOnState", "mode", "targetTemperature"} <= attr_names
     mode = next(a for a in master["attributes"] if a["name"] == "mode")
-    assert mode["legalValue"] == "(暖风, 吹风, 换气)"
+    assert mode["legalValue"] == "(HEAT, FAN, VENTILATION)"
     light = next(a for a in appliances if a["applianceTypes"] == ["LIGHT"])
     assert light["friendlyName"] == "米家智能浴霸N1 灯"
     assert {"turnOn", "turnOff", "setBrightnessPercentage"} <= set(light["actions"])
@@ -1401,7 +1573,7 @@ def test_control_yuba_set_mode_routes_to_function_switch():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": aid},
-                    "mode": {"value": "暖风"},
+                    "mode": {"value": "HEAT"},
                 },
             ),
         )
@@ -1426,7 +1598,7 @@ def test_control_yuba_unset_mode_turns_function_off():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": aid},
-                    "mode": {"value": "吹风"},
+                    "mode": {"value": "FAN"},
                 },
             ),
         )
@@ -1758,3 +1930,70 @@ def test_discovery_sensor_temperature_normalized_to_fahrenheit():
     attr = next(a for a in app["attributes"] if a["name"] == "temperature")
     assert attr["value"] == 78.8
     assert attr["scale"] == "FAHRENHEIT"
+
+
+def test_climate_off_state_advertises_turn_off():
+    # Regression: HA exposes climate hvac mode as the entity *state*, with no
+    # ``hvac_mode`` attribute (Midea / xiaomi ACs). An off AC must not be
+    # reported to DuerOS as ON just because the attribute is missing.
+    hass = FakeHass(
+        [
+            FakeState(
+                "climate.ac_off",
+                "off",
+                {"friendly_name": "客厅空调", "hvac_modes": ["off", "heat", "cool", "dry", "fan_only"]},
+            ),
+            FakeState(
+                "climate.ac_on",
+                "cool",
+                {"friendly_name": "卧室空调", "hvac_modes": ["off", "heat", "cool"]},
+            ),
+        ]
+    )
+    devices = _device_map(hass, ["climate.ac_off", "climate.ac_on"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    by_id = {a["applianceId"]: a for a in result["payload"]["discoveredAppliances"]}
+    off_state = next(a for a in by_id["climate.ac_off"]["attributes"] if a["name"] == "turnOnState")
+    on_state = next(a for a in by_id["climate.ac_on"]["attributes"] if a["name"] == "turnOnState")
+    assert off_state["value"] == "OFF"
+    assert on_state["value"] == "ON"
+
+
+def test_climate_device_hides_setting_switches_and_fans():
+    # Regression: one physical AC (climate master) must surface as a single
+    # AIR_CONDITION appliance. The Midea AC's sibling setting entities
+    # (屏幕显示/干燥模式/新风 fan …) are not standalone DuerOS appliances.
+    hass = FakeHass(
+        [
+            FakeState(
+                "climate.ac",
+                "off",
+                {"friendly_name": "空调", "hvac_modes": ["off", "heat", "cool", "dry", "fan_only"]},
+            ),
+            FakeState("switch.ac_screen", "off", {"friendly_name": "屏幕显示"}),
+            FakeState("switch.ac_dry", "off", {"friendly_name": "干燥模式"}),
+            FakeState("fan.ac_fresh", "off", {"friendly_name": "新风"}),
+        ]
+    )
+    devices = _seed_enhanced(
+        hass,
+        config={"ac-dev": []},
+        device_of=lambda eid: "ac-dev",
+        name_of=lambda key: "空调",
+    )
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    appliances = result["payload"]["discoveredAppliances"]
+    assert [a["applianceId"] for a in appliances] == ["climate.ac"]
+    assert appliances[0]["applianceTypes"] == ["AIR_CONDITION"]

@@ -16,7 +16,7 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.4**。
+当前集成版本：**v0.9.5**。
 
 ## 功能
 
@@ -39,6 +39,9 @@
   上报（公制即统一摄氏度）；`unknown`/`unavailable` 等非数值读数不再上报 0.0。
 - **独立灯设备**：浴霸、晾衣杆等复合设备的灯拆分为独立 `LIGHT` 设备，
   亮度/色温/颜色等能力按 HA 实体实际能力自动暴露。
+- **空调温控加减**：温度与风速同时支持小度 App 的 `set*` 与
+  `increment/decrement` 步进控制；空调风速按 HA climate 的离散 `fan_mode`
+  档位（如 20/40/…/100/auto）映射，不再依赖不存在的 `percentage`。
 
 ## 要求
 

@@ -74,8 +74,8 @@ def test_yuba_mode_read_current_function():
     entities = {"heating": ctx.find_state("switch.heating"), "blow": ctx.find_state("switch.blow"),
                 "ventilation": ctx.find_state("switch.ventilation"), "light": ctx.find_state("light.yuba")}
     val = mode.read(__import__("types").SimpleNamespace(entities=entities))
-    # heating and light both on; first in mode order wins -> 暖风
-    assert val.value == "暖风"
+    # heating and light both on; first in mode order wins -> HEAT
+    assert val.value == "HEAT"
 
 
 def test_yuba_set_mode_writes_target_function():
@@ -85,7 +85,7 @@ def test_yuba_set_mode_writes_target_function():
     entities = {"heating": ctx.find_state("switch.heating"), "blow": ctx.find_state("switch.blow"),
                 "ventilation": ctx.find_state("switch.ventilation"), "light": ctx.find_state("light.yuba")}
     write_ctx = __import__("types").SimpleNamespace(
-        action=DuerAction("setMode", "mode", "mode"), payload={"mode": {"value": "吹风"}}, entities=entities)
+        action=DuerAction("setMode", "mode", "mode"), payload={"mode": {"value": "FAN"}}, entities=entities)
     calls = mode.write(write_ctx)
     assert [(c.target_entity_id, c.service) for c in calls] == [("switch.blow", "turn_on")]
 

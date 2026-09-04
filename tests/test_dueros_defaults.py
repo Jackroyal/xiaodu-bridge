@@ -69,7 +69,10 @@ def test_sensor_pair_aggregates_into_single_sensor():
     d = devs[0]
     assert d.profile_key == "SENSOR"
     assert d.appliance_types == ("SENSOR",)
-    assert d.actions() == []  # read-only: no write actions
+    # Read-only sensor: no *control* actions, but the query capabilities are
+    # advertised as query actions so DuerOS can answer 温度/湿度 questions.
+    assert set(d.actions()) == {"getHumidity", "getTemperatureReading"}
+    assert {c.key for c in d.capabilities} <= {"temperature", "humidity"}
     caps = {c.key for c in d.capabilities}
     assert {"temperature", "humidity"} <= caps
 
