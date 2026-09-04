@@ -253,13 +253,16 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
             )
         )
 
-    # mode: N switch entities synthesise the active function (暖风/吹风/换气).
+    # mode: N switch entities synthesise the active function. DuerOS addresses
+    # a 浴霸's functions with *English* mode codes — confirmed from live
+    # SetModeRequest traffic: 吹风=FAN, 换气=VENTILATION (取暖=HEAT, same
+    # pattern) — so mode values / legalValue use codes, not Chinese labels.
     mode_elems = [
-        (label, role, eid)
-        for label, role, eid in (
-            ("暖风", "heating", heat),
-            ("吹风", "blow", blow),
-            ("换气", "ventilation", vent),
+        (code, role, eid)
+        for code, role, eid in (
+            ("HEAT", "heating", heat),
+            ("FAN", "blow", blow),
+            ("VENTILATION", "ventilation", vent),
         )
         if eid
     ]

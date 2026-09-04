@@ -21,6 +21,7 @@ from .. import devices as device_mod
 from .composers import (
     brightness_mapping,
     channel_mapping,
+    climate_fan_speed_mapping,
     climate_mode_mapping,
     climate_temperature_mapping,
     color_mapping,
@@ -274,7 +275,7 @@ def _control_mappings(
         if "targetTemperature" in caps:
             out.append(climate_temperature_mapping(entity_id=entity_id, appliance_types=appliance_types))
         if "fanSpeed" in caps:
-            out.append(fan_speed_mapping(entity_id=entity_id, appliance_types=appliance_types, domain="climate"))
+            out.append(climate_fan_speed_mapping(entity_id=entity_id, appliance_types=appliance_types))
     elif domain == "media_player":
         if "volume" in caps:
             out.append(volume_mapping(entity_id=entity_id, appliance_types=appliance_types))
@@ -316,6 +317,15 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         # Fall back to all non-auxiliary control entities when the main-power
         # switch marker is absent (e.g. a generic plug named ``switch.plug``).
         control_entities = filtered or control_entities
+    elif any(getattr(s, "domain", "") == "climate" for s in control_entities):
+        # A device whose master is a climate (AC / fridge zone) is one
+        # appliance. The Midea AC integrations splits one physical AC into a
+        # climate entity plus many *settings* switches/fans (屏幕显示、电辅热、
+        # 干燥、自清洁、新风 …) — exposing those as standalone SWITCH/FAN
+        # appliances clutters DuerOS. Keep only the climate entity(ies).
+        control_entities = [
+            s for s in control_entities if getattr(s, "domain", "") == "climate"
+        ]
 
     query_entities = _query_capabilities(states)
     devices: list[DuerDevice] = []

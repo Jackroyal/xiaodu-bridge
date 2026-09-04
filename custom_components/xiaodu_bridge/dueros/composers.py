@@ -47,6 +47,10 @@ from .constants import (
     ATTR_MUTE_STATE,
     ATTR_WATER_LEVEL,
     ACTION_CONTINUE,
+    ACTION_DECREMENT_FAN_SPEED,
+    ACTION_DECREMENT_TEMPERATURE,
+    ACTION_INCREMENT_FAN_SPEED,
+    ACTION_INCREMENT_TEMPERATURE,
     ACTION_PAUSE,
     ACTION_SET_FAN_SPEED,
     ACTION_SET_GEAR,
@@ -84,6 +88,20 @@ def _payload_value(payload: dict[str, Any], key: str) -> Any:
     return node
 
 
+def _payload_number(payload: dict[str, Any], *keys: str) -> float | None:
+    """Return the first numeric payload value found under any of ``keys``.
+
+    The DuerOS incremental payloads use ``{deltaTemperature: {value: 1.0}}``
+    style objects; accepting several aliases keeps the handler robust until the
+    exact field name is confirmed by a captured request.
+    """
+    for key in keys:
+        value = _num(_payload_value(payload, key))
+        if value is not None:
+            return value
+    return None
+
+
 def _temperature_target_unit(hass: Any) -> str:
     """The temperature unit Home Assistant is configured to display.
 
@@ -116,7 +134,16 @@ def _convert_temperature(value: float, from_unit: str, to_unit: str) -> float:
 def is_powered_on(state: Any) -> bool:
     """Return True when a HA entity is considered powered-on."""
     if state.domain == "climate":
-        return str(state.attributes.get("hvac_mode", "")).lower() != "off"
+        # Modern HA exposes the hvac mode as the entity *state* (off / heat /
+        # cool / ...), not necessarily as an ``hvac_mode`` attribute. Trust the
+        # state first so an off AC is not reported ON just because the
+        # attribute is absent (Midea / xiaomi ACs expose no hvac_mode attr).
+        mode = str(
+            getattr(state, "state", "")
+            or (state.attributes or {}).get("hvac_mode")
+            or ""
+        ).lower()
+        return mode not in ("", "off", "unavailable", "unknown")
     if state.domain == "cover":
         return state.state in ("open", "opening")
     return state.state == "on"
@@ -392,6 +419,20 @@ def pause_mapping(
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
 
+def _query_action_name(query_name: str) -> str:
+    """Discovery action advertised for a DuerOS query request.
+
+    ``GetTemperatureReadingRequest`` -> ``getTemperatureReading``,
+    ``GetHumidityRequest`` -> ``getHumidity``. A read-only sensor still has to
+    advertise its query as an *action* so the platform knows it can answer
+    "现在多少度 / 湿度多少" (mirrors havcs).
+    """
+    name = query_name
+    if name.endswith("Request"):
+        name = name[: -len("Request")]
+    return (name[:1].lower() + name[1:]) if name else name
+
+
 def sensor_query_mapping(
     *,
     entity_id: str,
@@ -403,13 +444,20 @@ def sensor_query_mapping(
     query_names: tuple[str, ...] = (),
     scale: str = "",
 ) -> CapabilityMapping:
-    """A read-only sensor query (temperature / humidity / electricity capacity)."""
+    """A read-only sensor query (temperature / humidity / electricity capacity).
+
+    Each supported query is advertised as an action (``getTemperatureReading``
+    etc.) so the appliance is not discoverable with an empty ``actions`` list.
+    """
     cap = DuerCapability(
         capability_key,
         "查询",
         kind=CAP_KIND_QUERY,
         appliance_types=appliance_types,
         attributes=(DuerAttribute(attribute_name, "number", unit=unit, legal=legal),),
+        actions=tuple(
+            DuerAction(_query_action_name(q), capability_key) for q in query_names
+        ),
         query_names=query_names,
     )
 
@@ -755,6 +803,90 @@ def fan_speed_mapping(
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
 
+def _climate_fan_levels(state: Any) -> list[str]:
+    """Order a climate's ``fan_modes`` from slowest to fastest.
+
+    AC integrations (Midea / xiaomi) model fan speed as discrete
+    ``fan_modes`` — percentage strings ("20".."100") plus an "auto" token.
+    Numeric modes sort by value; anything non-numeric (e.g. auto) is treated
+    as the fastest level.
+    """
+    modes = list((state.attributes.get("fan_modes") or ()) if state is not None else [])
+    numeric: list[str] = []
+    labelled: list[str] = []
+    for mode in modes:
+        if _num(mode) is not None:
+            numeric.append(str(mode))
+        else:
+            labelled.append(str(mode))
+    numeric.sort(key=float)
+    return numeric + labelled
+
+
+def _climate_fan_index(state: Any, levels: list[str]) -> int | None:
+    """0-based index of the climate's current ``fan_mode`` within ``levels``."""
+    if state is None or not levels:
+        return None
+    current = str(state.attributes.get("fan_mode") or "")
+    return levels.index(current) if current in levels else None
+
+
+def climate_fan_speed_mapping(
+    *,
+    entity_id: str,
+    appliance_types: tuple[str, ...],
+) -> CapabilityMapping:
+    """AC fan speed (``setFanSpeed`` / ``incrementFanSpeed`` / ``decrementFanSpeed``).
+
+    The climate domain has no ``percentage`` attribute, so DuerOS fan speed
+    (0..10) maps onto the climate's discrete ``fan_mode`` levels (0-based index
+    into the ordered list) and is written via ``climate.set_fan_mode`` instead
+    of the ``fan.set_percentage`` used by standalone fans.
+    """
+    cap = DuerCapability(
+        "fanSpeed",
+        "风速",
+        kind=CAP_KIND_CONTROL,
+        appliance_types=appliance_types,
+        attributes=(DuerAttribute(ATTR_FAN_SPEED, "number", legal="[0, 10]"),),
+        actions=(
+            DuerAction(ACTION_SET_FAN_SPEED, "fanSpeed", "fanSpeed"),
+            DuerAction(ACTION_INCREMENT_FAN_SPEED, "fanSpeed", "fanSpeed"),
+            DuerAction(ACTION_DECREMENT_FAN_SPEED, "fanSpeed", "fanSpeed"),
+        ),
+    )
+
+    def read(ctx: ReadContext) -> AttributeValue:
+        state = ctx.entities.get("value")
+        index = _climate_fan_index(state, _climate_fan_levels(state))
+        return make_attribute(ATTR_FAN_SPEED, index if index is not None else 0, legal="[0, 10]")
+
+    def write(ctx: WriteContext) -> list[ServiceCall] | None:
+        state = ctx.entities.get("value")
+        levels = _climate_fan_levels(state)
+        if not levels:
+            return None
+        action = ctx.action.name
+        if action == ACTION_SET_FAN_SPEED:
+            value = _num(_payload_value(ctx.payload, "fanSpeed"))
+            if value is None:
+                return None
+            index = max(0, min(len(levels) - 1, round(value)))
+        elif action in (ACTION_INCREMENT_FAN_SPEED, ACTION_DECREMENT_FAN_SPEED):
+            current = _climate_fan_index(state, levels)
+            if current is None:
+                return None
+            delta = _payload_number(ctx.payload, "deltaFanSpeed", "fanSpeed")
+            delta = 1 if delta is None else round(delta)
+            step = delta if action == ACTION_INCREMENT_FAN_SPEED else -delta
+            index = max(0, min(len(levels) - 1, current + step))
+        else:
+            return None
+        return [ServiceCall("climate", "set_fan_mode", {"fan_mode": levels[index]}, entity_id)]
+
+    return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
+
+
 def climate_mode_mapping(
     *,
     entity_id: str,
@@ -801,14 +933,23 @@ def climate_temperature_mapping(
     entity_id: str,
     appliance_types: tuple[str, ...],
 ) -> CapabilityMapping:
-    """Climate target temperature (``setTemperature``)."""
+    """Climate target temperature (``setTemperature`` / ``increment`` / ``decrement``).
+
+    The DuerOS app's +/− steppers bind to the incremental actions, so they are
+    advertised next to the absolute ``setTemperature`` and implemented by
+    applying the delta to the current HA target temperature.
+    """
     cap = DuerCapability(
         "targetTemperature",
         "目标温度",
         kind=CAP_KIND_CONTROL,
         appliance_types=appliance_types,
         attributes=(DuerAttribute(ATTR_TARGET_TEMPERATURE, "number", unit="CELSIUS", legal="DOUBLE"),),
-        actions=(DuerAction(ACTION_SET_TEMPERATURE, "targetTemperature", "temperature"),),
+        actions=(
+            DuerAction(ACTION_SET_TEMPERATURE, "targetTemperature", "temperature"),
+            DuerAction(ACTION_INCREMENT_TEMPERATURE, "targetTemperature", "temperature"),
+            DuerAction(ACTION_DECREMENT_TEMPERATURE, "targetTemperature", "temperature"),
+        ),
     )
 
     def read(ctx: ReadContext) -> AttributeValue | None:
@@ -819,12 +960,26 @@ def climate_temperature_mapping(
         return make_attribute(ATTR_TARGET_TEMPERATURE, value, scale="CELSIUS", legal="DOUBLE")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
-        if ctx.action.name != ACTION_SET_TEMPERATURE:
-            return None
-        value = _num(_payload_value(ctx.payload, "temperature"))
-        if value is None:
-            return None
-        return [ServiceCall("climate", "set_temperature", {"temperature": value}, entity_id)]
+        state = ctx.entities.get("value")
+        action = ctx.action.name
+        if action == ACTION_SET_TEMPERATURE:
+            value = _num(_payload_value(ctx.payload, "temperature"))
+            if value is None:
+                return None
+            return [ServiceCall("climate", "set_temperature", {"temperature": value}, entity_id)]
+        if action in (ACTION_INCREMENT_TEMPERATURE, ACTION_DECREMENT_TEMPERATURE):
+            current = _num(state.attributes.get("temperature") if state else None)
+            if current is None:
+                return None
+            step = _num(state.attributes.get("target_temp_step")) if state is not None else None
+            delta = _payload_number(ctx.payload, "deltaTemperature", "temperature")
+            if delta is None:
+                delta = step or 1.0
+            value = current + delta if action == ACTION_INCREMENT_TEMPERATURE else current - delta
+            if step:
+                value = round(round(value / step) * step, 2)
+            return [ServiceCall("climate", "set_temperature", {"temperature": value}, entity_id)]
+        return None
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
@@ -916,13 +1071,15 @@ __all__ = [
     "sensor_query_mapping",
     "composite_power_mapping",
     "is_powered_on",
-    "_turn_on_state_attr",    "brightness_mapping",
+    "_turn_on_state_attr",
+    "brightness_mapping",
     "color_temperature_mapping",
     "color_mapping",
     "volume_mapping",
     "mute_mapping",
     "channel_mapping",
     "fan_speed_mapping",
+    "climate_fan_speed_mapping",
     "climate_mode_mapping",
     "climate_temperature_mapping",
     "target_humidity_mapping",

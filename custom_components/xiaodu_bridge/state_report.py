@@ -37,6 +37,7 @@ from .const import (
     CONF_BOT_ID,
     DUEROS_CHANGE_REPORT_URL,
 )
+from .dueros.model import CAP_KIND_CONTROL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -162,8 +163,10 @@ class StateReportManager:
     the snapshot and schedules a debounced report that pushes the changed
     attribute names back to DuerOS (using the stable ``applianceId``).
 
-    Pure read-only appliances (``actions == []``) are skipped: DuerOS rejects
-    ChangeReportRequest for appliances without control actions.
+    Pure read-only appliances (no control capability, e.g. temperature /
+    humidity sensors) are skipped: DuerOS rejects ChangeReportRequest for
+    appliances without control actions. They still advertise *query* actions
+    (``getTemperatureReading`` / ``getHumidity``) so voice queries work.
     """
 
     def __init__(self, hass: HomeAssistant, entry: Any) -> None:
@@ -339,8 +342,12 @@ class StateReportManager:
             device = self._devices.get(device_id)
             if device is None:
                 continue
-            # DuerOS rejects changereport for pure read-only appliances.
-            if not device.actions():
+            # DuerOS rejects changereport for pure read-only appliances. They
+            # do advertise query actions (getTemperatureReading / getHumidity),
+            # so detect "query-only" by capability kind, not by actions == [].
+            if not any(
+                m.capability.kind == CAP_KIND_CONTROL for m in device.capabilities
+            ):
                 _LOGGER.debug(
                     "Skip state report for %s: query-only device "
                     "(DuerOS rejects changereport for pure sensors)",
