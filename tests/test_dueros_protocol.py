@@ -787,6 +787,51 @@ def test_discovery_climate_advertises_increment_and_decrement():
     assert fan["value"] == 2
 
 
+def test_discovery_climate_reports_mode_from_entity_state():
+    # Midea-style ACs expose the HVAC mode as the entity *state* (``cool``)
+    # without an ``hvac_mode`` attribute; mode must not report empty.
+    hass = FakeHass([_ac_state(state="cool")])
+    devices = _device_map(hass, ["climate.ac"], caps=["mode"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    mode = next(a for a in app["attributes"] if a["name"] == "mode")
+    assert mode["value"] == "COOL"
+
+
+def test_control_climate_set_temperature_accepts_target_temperature_payload():
+    # Real Xiaodu voice setTemperature carries the target under
+    # ``targetTemperature`` (mirroring the attribute name); make sure it maps
+    # to climate.set_temperature instead of NotSupportedInCurrentModeError.
+    hass = FakeHass([_ac_state(temperature=23.0)])
+    devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetTemperatureRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "targetTemperature": {"value": 24, "scale": "CELSIUS"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "SetTemperatureConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_temperature", {"entity_id": "climate.ac", "temperature": 24.0})
+    ]
+
+
 def test_control_climate_increment_temperature():
     hass = FakeHass([_ac_state(temperature=25.0)])
     devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature"])

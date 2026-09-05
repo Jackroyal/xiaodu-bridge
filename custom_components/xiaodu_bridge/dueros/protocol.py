@@ -258,6 +258,21 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
 
+def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a DuerOS payload safe to log (credentials scrubbed)."""
+
+    def _scrub(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {
+                key: "<redacted>" if key == "accessToken" else _scrub(value)
+                for key, value in node.items()
+            }
+        if isinstance(node, list):
+            return [_scrub(value) for value in node]
+        return node
+
+    return _scrub(payload)
+
 def _build_and_cache_enhanced(hass: HomeAssistant) -> EnhancedDeviceSet | None:
     """Build the enhanced device set from the hub entry and cache it.
 
@@ -362,6 +377,12 @@ async def handle_request(
         namespace,
         header.get("name", ""),
         message_id,
+    )
+    _LOGGER.debug(
+        "DuerOS payload: namespace=%s name=%s payload=%s",
+        namespace,
+        header.get("name", ""),
+        _redact_payload(payload),
     )
 
     # Prefer the enhanced set passed by the caller (the runtime path); fall
