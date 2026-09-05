@@ -183,9 +183,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _schedule_device_set_refresh(hass)
 
     data[DATA_STRUCTURE_UNSUBS] = [
-        er.async_get(hass).async_listen(_on_registry_event),
-        dr.async_get(hass).async_listen(_on_registry_event),
-        ar.async_get(hass).async_listen(_on_registry_event),
+        hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _on_registry_event),
+        hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, _on_registry_event),
+        hass.bus.async_listen(ar.EVENT_AREA_REGISTRY_UPDATED, _on_registry_event),
         hass.bus.async_listen(EVENT_STATE_CHANGED, _on_state_changed),
     ]
     return True

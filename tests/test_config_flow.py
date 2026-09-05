@@ -23,6 +23,7 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.xiaodu_bridge.const import (
+    CONF_BOT_ID,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_PUBLIC_URL,
@@ -43,6 +44,7 @@ async def test_flow_creates_entry(hass) -> None:
         {
             CONF_CLIENT_ID: "dueros_test",
             CONF_CLIENT_SECRET: "secret",
+            CONF_BOT_ID: "bot-1",
             CONF_REDIRECT_URI: "https://xiaodu.baidu.com/saiya/auth/test",
             CONF_PUBLIC_URL: "https://ha.example.com:8123",
         },
@@ -65,6 +67,7 @@ async def test_flow_rejects_invalid_url(hass) -> None:
         {
             CONF_CLIENT_ID: "dueros_test",
             CONF_CLIENT_SECRET: "secret",
+            CONF_BOT_ID: "bot-1",
             CONF_REDIRECT_URI: "not-a-url",
             CONF_PUBLIC_URL: "https://ha.example.com:8123",
         },
@@ -102,7 +105,7 @@ async def test_options_flow_hub_menu(hass) -> None:
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] == FlowResultType.MENU
-    assert {"platform", "manage", "save"} <= set(result["menu_options"])
+    assert {"manage", "devices", "save"} <= set(result["menu_options"])
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "manage"}
