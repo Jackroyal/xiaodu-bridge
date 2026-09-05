@@ -12,6 +12,13 @@ import pytest
 
 pytest.importorskip("pytest_homeassistant_custom_component")
 
+
+@pytest.fixture(autouse=True)
+def _enable_custom_integrations(enable_custom_integrations):
+    """Let HA's config-flow loader resolve the xiaodu_bridge flow handler."""
+    yield
+
+
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 
@@ -89,7 +96,7 @@ async def test_options_flow_hub_menu(hass) -> None:
         name="客厅灯",
     )
     er.async_get(hass).async_get_or_create(
-        "switch", "living_lamp", device_id=device.id
+        "switch", "living_lamp", "unique_living_lamp", device_id=device.id
     )
     hass.states.async_set("switch.living_lamp", "off")
 

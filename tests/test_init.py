@@ -6,6 +6,20 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 
 from datetime import timedelta
 
+
+@pytest.fixture(autouse=True)
+def _enable_custom_integrations(enable_custom_integrations):
+    """Let HA's loader resolve this custom integration (manifest version)."""
+    yield
+
+
+@pytest.fixture(autouse=True)
+async def _setup_http(hass):
+    """Set up the http component so ``hass.http`` exists for view registration."""
+    from homeassistant.setup import async_setup_component
+
+    await async_setup_component(hass, "http", {})
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -74,7 +88,7 @@ async def test_sync_device_registry_creates_single_hub(
     assert len(owned) == 1
     hub = owned[0]
     assert hub.identifiers == {(DOMAIN, entry.entry_id)}
-    assert hub.name == "小度中枢"
+    assert hub.name == "xiaodu bridge"
     assert hub.manufacturer == "DuerOS"
     assert hub.model == "小度智能中枢"
     assert hub.disabled_by is None
