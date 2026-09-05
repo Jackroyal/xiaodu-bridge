@@ -102,6 +102,26 @@ def _payload_number(payload: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
+def _payload_temperature(payload: dict[str, Any]) -> tuple[float | None, str]:
+    """Extract (value, scale) from a SetTemperature payload.
+
+    Xiaodu sends the absolute target under ``targetTemperature`` (mirroring the
+    attribute name); other clients may use ``temperature``. Accept both so a
+    captured payload never falls through to ``NotSupportedInCurrentModeError``.
+    """
+    for key in ("temperature", "targetTemperature"):
+        node = payload.get(key)
+        if isinstance(node, dict):
+            value = _num(node.get("value"))
+            if value is not None:
+                return value, str(node.get("scale") or "")
+        else:
+            value = _num(node)
+            if value is not None:
+                return value, ""
+    return None, ""
+
+
 def _temperature_target_unit(hass: Any) -> str:
     """The temperature unit Home Assistant is configured to display.
 
@@ -907,7 +927,14 @@ def climate_mode_mapping(
 
     def read(ctx: ReadContext) -> AttributeValue:
         state = ctx.entities.get("value")
-        mode = str(state.attributes.get("hvac_mode") or "").upper() if state else ""
+        if state is None:
+            return make_attribute(ATTR_MODE, "")
+        # Modern HA exposes the HVAC mode as the entity *state* (off / cool /
+        # ...); Midea / xiaomi AC integrations omit the ``hvac_mode`` attribute
+        # entirely. Prefer the state, then fall back to the attribute.
+        mode = str(
+            getattr(state, "state", "") or state.attributes.get("hvac_mode") or ""
+        ).upper()
         return make_attribute(ATTR_MODE, mode)
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
@@ -963,9 +990,14 @@ def climate_temperature_mapping(
         state = ctx.entities.get("value")
         action = ctx.action.name
         if action == ACTION_SET_TEMPERATURE:
-            value = _num(_payload_value(ctx.payload, "temperature"))
+            value, scale = _payload_temperature(ctx.payload)
             if value is None:
                 return None
+            # The payload scale may be FAHRENHEIT while HA stores the climate
+            # target temperature in its configured unit; normalise when known.
+            target = _temperature_target_unit(ctx.hass)
+            if scale and target and scale.lower() != target.lower():
+                value = _convert_temperature(value, scale, target)
             return [ServiceCall("climate", "set_temperature", {"temperature": value}, entity_id)]
         if action in (ACTION_INCREMENT_TEMPERATURE, ACTION_DECREMENT_TEMPERATURE):
             current = _num(state.attributes.get("temperature") if state else None)
