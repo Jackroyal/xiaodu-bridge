@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Iterable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -180,6 +181,8 @@ class StateReportManager:
         self._index: dict[str, list[str]] = {}
         # appliance id -> DuerDevice
         self._devices: dict[str, Any] = {}
+        # structural fingerprint of ``_devices`` (ids / capabilities / bindings)
+        self._signature: tuple = ()
         # appliance id -> last reported attribute snapshot ({name: value})
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._pending: dict[str, set[str]] = {}
@@ -194,6 +197,38 @@ class StateReportManager:
 
         enhanced = build_enhanced_for_hass(self.hass, self.entry)
         self._devices = {d.device_id: d for d in enhanced.all()}
+        self._signature = self._structure_signature(self._devices.values())
+
+    @staticmethod
+    def _structure_signature(devices: Iterable[Any]) -> tuple:
+        """Structural fingerprint of a device set (ids, types, caps, bindings).
+
+        Two sets with the same signature expose exactly the same appliances
+        with the same capabilities bound to the same entities, so a rebuild
+        (and the cooldown reset it implies) can be skipped.
+        """
+        return tuple(
+            sorted(
+                (
+                    dev.device_id,
+                    tuple(dev.appliance_types),
+                    tuple(
+                        sorted(
+                            (
+                                cap.key,
+                                tuple(
+                                    sorted(
+                                        (b.role, b.entity_id) for b in cap.bindings
+                                    )
+                                ),
+                            )
+                            for cap in dev.capabilities
+                        )
+                    ),
+                )
+                for dev in devices
+            )
+        )
 
     def async_start(self) -> None:
         """Register the state-change listener (idempotent)."""
@@ -234,14 +269,48 @@ class StateReportManager:
         Called at setup and whenever the config entry changes (options save /
         reconfigure), so newly exposed/hidden devices take effect immediately.
         """
-        for handle in self._handles.values():
-            handle.cancel()
-        self._handles.clear()
-        self._pending.clear()
-        self._confirmed.clear()
-        self._last_sync.clear()
-
         self._build_devices()
+        self._rebuild_index(reset_cooldowns=True)
+
+    def async_refresh_if_changed(self) -> bool:
+        """Rebuild the index only when the device structure actually changed.
+
+        Called (debounced) after entity/device/area registry changes and after
+        entities are added or removed. Registry "update" events fire for many
+        trivial changes, so the signature check keeps them from rebuilding the
+        index and from resetting the DuerOS per-attribute cooldowns. Returns
+        True when the structure changed and the index was rebuilt.
+        """
+        if self._stopped:
+            return False
+        from .dueros.enhanced import build_enhanced_for_hass  # noqa: PLC0415
+
+        enhanced = build_enhanced_for_hass(self.hass, self.entry)
+        devices = {d.device_id: d for d in enhanced.all()}
+        signature = self._structure_signature(devices.values())
+        if signature == self._signature:
+            return False
+        self._devices = devices
+        self._signature = signature
+        # Keep the report cooldowns: unchanged devices must not re-report
+        # attributes that DuerOS still considers freshly synced.
+        self._rebuild_index(reset_cooldowns=False)
+        _LOGGER.debug(
+            "State report index refreshed after structure change: %d devices",
+            len(self._devices),
+        )
+        return True
+
+    def _rebuild_index(self, *, reset_cooldowns: bool) -> None:
+        """Rebuild the entity index and attribute snapshots."""
+        if reset_cooldowns:
+            for handle in self._handles.values():
+                handle.cancel()
+            self._handles.clear()
+            self._pending.clear()
+            self._confirmed.clear()
+            self._last_sync.clear()
+
         index: dict[str, set[str]] = {}
         for dev_id, dev in self._devices.items():
             for mapping in dev.capabilities:

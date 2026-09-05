@@ -36,6 +36,10 @@ OAUTH_REFRESH_TOKEN_EXPIRE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 # Runtime state keys (hass.data[DOMAIN])
 DATA_TIMER_MANAGER = "timed_services"
 DATA_STATE_REPORT_MANAGER = "state_report"
+# Device-set cache invalidation: registry / entity add-remove events schedule
+# one debounced refresh (unsub callables + the pending async_call_later handle).
+DATA_STRUCTURE_UNSUBS = "structure_unsubs"
+DATA_STRUCTURE_REFRESH_HANDLE = "structure_refresh_handle"
 
 # Device selection options: device_key -> enabled capability keys.
 CONF_DEVICES = "devices"

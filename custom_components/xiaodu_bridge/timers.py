@@ -27,7 +27,6 @@ from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import utc_from_timestamp
 
-from .const import DATA_TIMER_MANAGER, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,14 +41,6 @@ def _key(record: dict[str, Any]) -> tuple[str, str, str]:
         str(record.get("service", "")),
         str((record.get("data") or {}).get("entity_id", "")),
     )
-
-
-def get_timer_manager(hass: HomeAssistant) -> TimedServiceManager:
-    """Return the shared timed-service manager, creating it on first use."""
-    data = hass.data.setdefault(DOMAIN, {})
-    if DATA_TIMER_MANAGER not in data:
-        data[DATA_TIMER_MANAGER] = TimedServiceManager(hass)
-    return data[DATA_TIMER_MANAGER]
 
 
 class TimedServiceManager:

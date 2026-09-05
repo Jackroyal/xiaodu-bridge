@@ -54,7 +54,6 @@ def load_dueros() -> tuple:
 
     for mod in ("constants", "model", "composers", "registry", "profiles", "defaults", "enhanced"):
         _load_module(f"xiaodu.dueros.{mod}", _XIAODU / "dueros" / f"{mod}.py")
-    _load_module("xiaodu.dueros.adapters", _XIAODU / "dueros" / "adapters.py")
     protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
 
     return protocol.handle_request, protocol
@@ -91,6 +90,5 @@ def load_enhanced() -> tuple:
     sys.modules["xiaodu.dueros"] = pkg
     for mod in ("constants", "model", "composers", "registry", "profiles", "defaults", "enhanced"):
         _load_module(f"xiaodu.dueros.{mod}", _XIAODU / "dueros" / f"{mod}.py")
-    _load_module("xiaodu.dueros.adapters", _XIAODU / "dueros" / "adapters.py")
     protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
     return protocol, sys.modules["xiaodu.dueros.enhanced"]

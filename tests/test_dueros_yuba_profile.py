@@ -5,7 +5,7 @@ from tests._dueros_loader import load_semantic_model
 registry_mod = load_semantic_model()
 
 from xiaodu.dueros.model import DuerAction, DuerDeviceProfile, DeviceBuildContext, make_device_id
-from xiaodu.dueros.registry import MappingRegistry
+from xiaodu.dueros.registry import ProfileRegistry
 from xiaodu.dueros.profiles import YUBA_PROFILE, build_yuba, match_role, register_default_profiles
 
 
@@ -130,12 +130,13 @@ def test_match_role_suggestion_only():
 
 
 def test_register_default_profiles_and_build_via_registry():
-    reg = MappingRegistry()
+    reg = ProfileRegistry()
     register_default_profiles(reg)
-    assert reg.get_profile("YUBA") is not None
-    dev = reg.build_device(_ctx())
-    assert dev is not None and dev.profile_key == "YUBA"
-    assert dev.device_id == make_device_id("YUBA", "ha-device-1")
+    profile = reg.get_profile("YUBA")
+    assert profile is not None
+    built = profile.build(_ctx())
+    assert built and built[0].profile_key == "YUBA"
+    assert built[0].device_id == make_device_id("YUBA", "ha-device-1")
 
 
 def test_build_yuba_leaves_light_unclaimed():

@@ -2,15 +2,12 @@
 
 Covers ``dueros.model`` (DuerDevice / CapabilityMapping / AttributeValue),
 ``dueros.composers`` (power / mode_switches / select / target_temperature /
-percentage / sensor_query / composite_power) and ``dueros.registry``.
+percentage / sensor_query / composite_power).
 """
 
 from tests._dueros_loader import load_semantic_model
 
-registry_mod = load_semantic_model()
-
-REGISTRY = registry_mod.REGISTRY
-MappingRegistry = registry_mod.MappingRegistry
+load_semantic_model()
 from xiaodu.dueros.model import (
     AttributeValue,
     CapabilityMapping,
@@ -18,7 +15,6 @@ from xiaodu.dueros.model import (
     DuerAttribute,
     DuerCapability,
     DuerDevice,
-    DuerDeviceProfile,
     EntityBinding,
     ServiceCall,
     make_attribute,
@@ -239,31 +235,3 @@ def test_composite_power_read_and_turn_off():
     calls = m.write(ctx)
     # All currently-on function entities get turn_off (only heating).
     assert [(c.target_entity_id, c.service) for c in calls] == [("switch.heating", "turn_off")]
-
-
-# --- registry ---
-
-def test_registry_resolve_profile_then_domain_default():
-    reg = MappingRegistry()
-    reg.register_domain_default("light", power_mapping(domain="light", entity_id="light.x", appliance_types=("LIGHT",)))
-    reg.register_profile(DuerDeviceProfile(key="YUBA", appliance_types=("YUBA",)))
-    reg.register_mapping("YUBA", mode_switches_mapping(
-        modes=(("暖风", "h", "switch.h"),), appliance_types=("YUBA",)))
-    assert len(reg.resolve_capabilities("YUBA", "light")) == 1   # profile first
-    assert len(reg.resolve_capabilities("", "light")) == 1       # domain default
-
-
-def test_registry_build_dueros_device():
-    reg = MappingRegistry()
-    reg.register_domain_default("light", power_mapping(domain="light", entity_id="light.x", appliance_types=("LIGHT",)))
-    dev = reg.build_dueros_device(
-        device_id="dueros-light", friendly_name="灯", profile_key="", primary_entity_id="light.x",
-        domain="light", enabled_capability_keys=("power",),
-    )
-    assert dev is not None
-    assert dev.device_id == "dueros-light"
-    assert dev.actions() == ["turnOn", "turnOff"]
-    # Unknown/profile-less device with no default mapping -> None.
-    assert reg.build_dueros_device(
-        device_id="x", friendly_name="x", profile_key="", primary_entity_id="sensor.y",
-        domain="sensor", enabled_capability_keys=(),) is None
