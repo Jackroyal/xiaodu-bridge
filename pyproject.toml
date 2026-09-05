@@ -14,3 +14,5 @@ test = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+# HA 级测试依赖 pytest-asyncio 自动模式处理 async 测试/fixture（phacc 要求）
+asyncio_mode = "auto"
