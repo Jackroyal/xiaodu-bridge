@@ -72,7 +72,7 @@ async def test_options_flow_hub_menu(hass) -> None:
     from homeassistant.helpers import entity_registry as er
 
     from custom_components.xiaodu_bridge.const import CONF_DEVICES, CONF_SYNC_AREAS
-    from tests.common import MockConfigEntry
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
     entry = MockConfigEntry(
         domain=DOMAIN,
