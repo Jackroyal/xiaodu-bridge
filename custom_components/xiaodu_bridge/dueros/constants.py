@@ -13,7 +13,6 @@ NAMESPACE_QUERY = "DuerOS.ConnectedHome.Query"
 NAMESPACE_UNBIND = "DuerOS.ConnectedHome.UnbindBot"
 
 # Error names per the Xiaodu protocol spec
-ERROR_INVALID_TOKEN = "InvalidAccessTokenError"
 ERROR_DEVICE_NOT_FOUND = "DriverInternalError"
 ERROR_OFFLINE = "TargetOfflineError"
 ERROR_UNSUPPORTED = "NotSupportedInCurrentModeError"
@@ -51,7 +50,6 @@ APPLIANCE_SENSOR = "SENSOR"
 APPLIANCE_HUMIDIFIER = "HUMIDIFIER"
 APPLIANCE_SWEEPING_ROBOT = "SWEEPING_ROBOT"
 APPLIANCE_CLOTHES_RACK = "CLOTHES_RACK"
-APPLIANCE_YUBA = "YUBA"
 
 # ---------------------------------------------------------------------------
 # Long-term semantic model vocabulary (additive; see dueros/architecture docs).
@@ -59,32 +57,17 @@ APPLIANCE_YUBA = "YUBA"
 # and are the vocabulary the new ``dueros.model`` / ``dueros.composers`` use.
 # ---------------------------------------------------------------------------
 
-# Additional appliance types not yet exposed by the legacy adapters.
+# Appliance types for composite profiles.
 APPLIANCE_WASHING_MACHINE = "WASHING_MACHINE"
-APPLIANCE_WATER_HEATER = "WATER_HEATER"
-APPLIANCE_RANGE_HOOD = "RANGE_HOOD"
-APPLIANCE_DEHUMIDIFIER = "DEHUMIDIFIER"
-APPLIANCE_AIR_PURIFIER = "AIR_PURIFIER"
-APPLIANCE_TREADMILL = "TREADMILL"
-APPLIANCE_FISH_TANK = "FISH_TANK"
-APPLIANCE_BED = "BED"
 
-# Additional action names beyond the legacy set.
+# Action names used by composite profiles.
 ACTION_SET_GEAR = "setGear"
 ACTION_SET_WATER_LEVEL = "setWaterLevel"
 ACTION_START_UP = "startUp"
-ACTION_POWER = "setPower"
-ACTION_INCREMENT_POWER = "incrementPower"
-ACTION_DECREMENT_POWER = "decrementPower"
 ACTION_INCREMENT_TEMPERATURE = "incrementTemperature"
 ACTION_DECREMENT_TEMPERATURE = "decrementTemperature"
 ACTION_INCREMENT_FAN_SPEED = "incrementFanSpeed"
 ACTION_DECREMENT_FAN_SPEED = "decrementFanSpeed"
-ACTION_INCREMENT_BRIGHTNESS = "incrementBrightnessPercentage"
-ACTION_DECREMENT_BRIGHTNESS = "decrementBrightnessPercentage"
-ACTION_SET_MIST = "setMist"
-ACTION_INCREMENT_MIST = "incrementMist"
-ACTION_DECREMENT_MIST = "decrementMist"
 
 # Attribute names (match protocols/attributes.md). Used by ``DuerAttribute``.
 ATTR_TURN_ON_STATE = "turnOnState"
@@ -106,7 +89,4 @@ ATTR_CHANNEL = "channel"
 ATTR_MUTE_STATE = "muteState"
 ATTR_HUMIDITY = "humidity"
 ATTR_TARGET_HUMIDITY = "targetHumidity"
-ATTR_LOCATION = "location"
 ATTR_WORK_STATE = "workState"
-ATTR_NAME = "name"
-ATTR_CONNECTIVITY = "connectivity"

@@ -326,17 +326,6 @@ YUBA_PROFILE = DuerDeviceProfile(
 )
 
 
-# --- registration ------------------------------------------------------------
-
-def register_default_profiles(registry: Any) -> tuple[DuerDeviceProfile, ...]:
-    """Register the built-in device profiles and return them."""
-    registry.register_profile(YUBA_PROFILE)
-    return (YUBA_PROFILE,)
-
-
-__all__ = ["YUBA_PROFILE", "build_yuba", "match_role", "register_default_profiles"]
-
-
 # --- SWEEPING_ROBOT (扫地机器人) ----------------------------------------------
 
 def _vacuum_on(state: Any) -> bool:

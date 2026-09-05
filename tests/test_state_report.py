@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from tests._dueros_loader import load_dueros
 
@@ -135,6 +136,81 @@ def test_report_skips_without_bound_users():
     )
     assert session.posts == []
     assert accepted is False
+
+def _fake_binding(role, entity_id):
+    return SimpleNamespace(role=role, entity_id=entity_id)
+
+
+def _fake_cap(key, bindings, appliance_types=("LIGHT",)):
+    return SimpleNamespace(
+        key=key,
+        bindings=[_fake_binding(r, e) for r, e in bindings],
+        read=lambda ctx: None,
+    )
+
+
+def _fake_device(device_id, caps, appliance_types=("LIGHT",)):
+    return SimpleNamespace(
+        device_id=device_id, appliance_types=appliance_types, capabilities=caps
+    )
+
+
+def test_structure_signature_is_stable_and_change_sensitive():
+    sig = _module.StateReportManager._structure_signature
+    power_a = lambda: _fake_cap("power", [("power", "light.a")])
+    dev = _fake_device("d1", [power_a()])
+    same = _fake_device("d1", [power_a()])
+    assert sig([dev]) == sig([same])            # equal structure -> equal signature
+    assert sig([dev, same]) == sig([same, dev])  # order-insensitive
+    # binding moved to another entity
+    assert sig([dev]) != sig([_fake_device("d1", [_fake_cap("power", [("power", "light.b")])])])
+    # capability added
+    assert sig([dev]) != sig([_fake_device("d1", [power_a(), _fake_cap("brightness", [("target", "light.a")])])])
+    # device id changed
+    assert sig([dev]) != sig([_fake_device("d2", [power_a()])])
+    # appliance type changed
+    assert sig([dev]) != sig([_fake_device("d1", [power_a()], appliance_types=("SWITCH",))])
+    assert sig([]) == ()
+
+
+def test_async_refresh_if_changed_only_rebuilds_on_structure_change(monkeypatch):
+    class _States:
+        def get(self, entity_id):
+            return None
+
+    class _Hass:
+        states = _States()
+
+    current = [_fake_device("d1", [_fake_cap("power", [("power", "light.a")])])]
+
+    class _Set:
+        def all(self):
+            return list(current)
+
+    enhanced_mod = sys.modules["xiaodu.dueros.enhanced"]
+    monkeypatch.setattr(
+        enhanced_mod, "build_enhanced_for_hass", lambda hass, entry: _Set()
+    )
+
+    mgr = _module.StateReportManager(_Hass(), object())
+    mgr.async_rebuild()
+    assert "light.a" in mgr._index
+
+    # No structure change -> no rebuild, signature stable.
+    assert mgr.async_refresh_if_changed() is False
+
+    # Structure change -> rebuild, but per-attribute cooldowns are kept.
+    mgr._last_sync[("d1", "power")] = 123.0
+    current.clear()
+    current.append(_fake_device("d1", [_fake_cap("power", [("power", "light.b")])]))
+    assert mgr.async_refresh_if_changed() is True
+    assert "light.b" in mgr._index and "light.a" not in mgr._index
+    assert mgr._last_sync[("d1", "power")] == 123.0
+
+    # After shutdown the refresh is a no-op.
+    mgr._stopped = True
+    assert mgr.async_refresh_if_changed() is False
+
 
 def test_report_returns_false_when_rate_limited():
     session = _FakeSession(msg="One attribute can only sync 1 times during 60")

@@ -124,7 +124,7 @@ _YUBA_MARKERS = ("bhf", "浴霸")
 _SOCKET_MARKERS = ("plug", "插座")
 
 # Domains that can expose control capabilities to a speaker platform. Must
-# stay in sync with the registered adapters in ``dueros/adapters.py``.
+# stay in sync with the per-domain composers in ``dueros/defaults.py``.
 EXPOSABLE_DOMAINS = frozenset(
     {
         "light",

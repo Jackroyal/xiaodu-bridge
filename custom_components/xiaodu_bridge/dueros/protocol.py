@@ -2,9 +2,9 @@
 
 This module is deliberately thin: it knows the protocol envelope (header /
 payload, namespaces, response/error naming) but not domain specifics. All
-domain behavior lives in ``adapters.py`` / the semantic model; all constants
-in ``constants.py``. Adding a device capability means extending the model,
-not this dispatcher.
+domain behavior lives in the semantic model (``model.py`` / ``composers.py`` /
+``profiles.py`` / ``defaults.py``); all constants in ``constants.py``. Adding
+a device capability means extending the model, not this dispatcher.
 
 The only runtime path is the DuerOS *semantic* model (``enhanced.py``):
 Discovery / Query / Control all resolve against an ``EnhancedDeviceSet``.
@@ -258,16 +258,14 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
 
-def _get_enhanced(hass: HomeAssistant) -> EnhancedDeviceSet | None:
-    """Return the enhanced device set, building it on demand if needed.
+def _build_and_cache_enhanced(hass: HomeAssistant) -> EnhancedDeviceSet | None:
+    """Build the enhanced device set from the hub entry and cache it.
 
-    The set is the only runtime model; it is built on demand from the current
-    HA state / device profiles so the device-center path is always consulted.
+    Failures are logged and surfaced as ``None``: the request path must never
+    500, but a silent empty device list used to make build errors invisible
+    (DuerOS just answered "device not found"), so they are now logged loudly.
     """
     try:
-        cached = hass.data.get(DOMAIN, {}).get(DATA_ENHANCED_DEVICES)
-        if cached is not None:
-            return cached
         from .enhanced import build_enhanced_for_hass  # noqa: PLC0415
 
         entries = hass.config_entries.async_entries(DOMAIN)
@@ -277,7 +275,26 @@ def _get_enhanced(hass: HomeAssistant) -> EnhancedDeviceSet | None:
         hass.data.setdefault(DOMAIN, {})[DATA_ENHANCED_DEVICES] = built
         return built
     except Exception:  # noqa: BLE001 - never break the request path
+        _LOGGER.exception(
+            "Building the Xiaodu device set failed; DuerOS requests are "
+            "answered as if no devices were exposed"
+        )
         return None
+
+
+def _get_enhanced(hass: HomeAssistant) -> EnhancedDeviceSet | None:
+    """Return the enhanced device set, building it on demand if needed.
+
+    The set is the only runtime model. It is cached in ``hass.data`` and the
+    cache is invalidated (debounced) whenever the entity/device/area registries
+    or the entity set change (see the integration setup), so a lazy rebuild
+    here reflects the current HA state. Discovery additionally forces a
+    rebuild so a device-list refresh never serves a stale set.
+    """
+    cached = hass.data.get(DOMAIN, {}).get(DATA_ENHANCED_DEVICES)
+    if cached is not None:
+        return cached
+    return _build_and_cache_enhanced(hass)
 
 async def _enhanced_timing_control(
     hass: HomeAssistant,
@@ -350,8 +367,17 @@ async def handle_request(
     # Prefer the enhanced set passed by the caller (the runtime path); fall
     # back to the cached set in ``hass.data`` (on-demand build).
     enhanced = devices if isinstance(devices, EnhancedDeviceSet) else _get_enhanced(hass)
-    has_enhanced = bool(enhanced)
-    if not has_enhanced:
+
+    if namespace == NAMESPACE_DISCOVERY:
+        # Discovery is the moment Xiaodu refreshes its device list: rebuild
+        # from the current HA state so devices added/removed/renamed since the
+        # cache was built show up immediately, without waiting for (or relying
+        # on) the debounced cache invalidation.
+        fresh = _build_and_cache_enhanced(hass)
+        if fresh is not None:
+            enhanced = fresh
+
+    if not enhanced:
         return _error_response(header, ERROR_DEVICE_NOT_FOUND)
 
     appliance_id = str(payload.get("appliance", {}).get("applianceId", ""))

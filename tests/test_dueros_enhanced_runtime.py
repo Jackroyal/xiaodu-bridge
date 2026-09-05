@@ -38,11 +38,18 @@ class FakeServices:
     async def async_call(self, domain, service, data, blocking=True):
         self._hass.service_calls.append((domain, service, data))
 
+class FakeConfigEntries:
+    """No config entries: the Discovery rebuild falls back to the seeded set."""
+    def async_entries(self, domain):
+        return []
+
+
 class FakeHass:
     def __init__(self, states):
         self.states = FakeStates(states)
         self.service_calls = []
         self.services = FakeServices(self)
+        self.config_entries = FakeConfigEntries()
         self.data = {}
 
 def run(coro):

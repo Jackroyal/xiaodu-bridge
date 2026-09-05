@@ -6,6 +6,12 @@ once per setup; all runtime state (OAuth tokens, enhanced device set) is
 resolved per-request from the config entry. Pending DuerOS timing requests are
 loaded from storage at setup and re-armed with HA's event-loop scheduler.
 
+The cached enhanced device set is invalidated (debounced) whenever the
+entity/device/area registries change or entities are added/removed, so new HA
+devices reach Xiaodu without a restart; Discovery requests additionally
+rebuild the set fresh, and the state-report manager refreshes its index only
+when the device structure actually changed.
+
 The runtime model is the DuerOS *semantic* model (``dueros`` package): every
 exposable device is surfaced as one or more ``DuerDevice`` appliances. The
 legacy per-entity (unit) path is no longer used.
@@ -18,17 +24,23 @@ mirrored into it.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.loader import async_get_integration
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 
 from .const import (
-    CONF_DEVICES,
     DATA_ENHANCED_DEVICES,
     DATA_STATE_REPORT_MANAGER,
+    DATA_STRUCTURE_REFRESH_HANDLE,
+    DATA_STRUCTURE_UNSUBS,
     DATA_TIMER_MANAGER,
     DATA_VERSION,
     DOMAIN,
@@ -67,6 +79,43 @@ def _get_entry(hass: HomeAssistant) -> ConfigEntry | None:
     """Return the single Xiaodu hub entry, if configured."""
     entries = hass.config_entries.async_entries(DOMAIN)
     return entries[0] if entries else None
+
+
+# Registry / entity add-remove events coalesce into one device-set refresh
+# after this delay, so HA startup or bulk edits rebuild only once.
+STRUCTURE_REFRESH_DEBOUNCE_SECONDS = 2.0
+
+
+def _schedule_device_set_refresh(hass: HomeAssistant) -> None:
+    """Schedule a debounced refresh of the cached device set + report index.
+
+    Entity/device/area registry changes and entity add/remove alter the
+    semantic device set (membership, names, areas, capabilities). The cached
+    set in ``hass.data`` is dropped so the DuerOS request path rebuilds it
+    lazily, and the state-report manager refreshes its own index — but only
+    when the device *structure* actually changed (its signature check keeps
+    trivial registry updates from resetting DuerOS report cooldowns).
+    """
+    data = hass.data.get(DOMAIN)
+    if data is None:
+        return
+    handle = data.get(DATA_STRUCTURE_REFRESH_HANDLE)
+    if handle is not None:
+        handle()
+
+    async def _refresh(_now: Any) -> None:
+        data = hass.data.get(DOMAIN)
+        if data is None:
+            return
+        data.pop(DATA_STRUCTURE_REFRESH_HANDLE, None)
+        data.pop(DATA_ENHANCED_DEVICES, None)
+        manager = data.get(DATA_STATE_REPORT_MANAGER)
+        if manager is not None:
+            manager.async_refresh_if_changed()
+
+    data[DATA_STRUCTURE_REFRESH_HANDLE] = async_call_later(
+        hass, STRUCTURE_REFRESH_DEBOUNCE_SECONDS, _refresh
+    )
 
 
 async def async_remove_config_entry_device(
@@ -120,6 +169,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data[DATA_STATE_REPORT_MANAGER] = manager
     manager.async_start()
     manager.update_unsub = entry.add_update_listener(_async_update_listener)
+
+    # Keep the cached device set in sync with HA: registry changes (device /
+    # entity / area add-update-remove) and entity add/remove invalidate it.
+    def _on_registry_event(_event: Event) -> None:
+        _schedule_device_set_refresh(hass)
+
+    def _on_state_changed(event: Event) -> None:
+        # Only entity add/remove alters the device-set structure (membership
+        # and names of registered entities arrive via the registry events);
+        # plain state updates are the state-report manager's domain.
+        if event.data.get("old_state") is None or event.data.get("new_state") is None:
+            _schedule_device_set_refresh(hass)
+
+    data[DATA_STRUCTURE_UNSUBS] = [
+        er.async_get(hass).async_listen(_on_registry_event),
+        dr.async_get(hass).async_listen(_on_registry_event),
+        ar.async_get(hass).async_listen(_on_registry_event),
+        hass.bus.async_listen(EVENT_STATE_CHANGED, _on_state_changed),
+    ]
     return True
 
 
@@ -195,5 +263,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     report_manager = data.get(DATA_STATE_REPORT_MANAGER)
     if report_manager is not None:
         await report_manager.async_shutdown()
-    data.pop(entry.entry_id, None)
+    for unsub in data.pop(DATA_STRUCTURE_UNSUBS, []):
+        unsub()
+    handle = data.pop(DATA_STRUCTURE_REFRESH_HANDLE, None)
+    if handle is not None:
+        handle()
+    data.pop(DATA_ENHANCED_DEVICES, None)
     return True
