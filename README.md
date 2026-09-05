@@ -41,9 +41,12 @@
   上报（公制即统一摄氏度）；`unknown`/`unavailable` 等非数值读数不再上报 0.0。
 - **独立灯设备**：浴霸、晾衣杆等复合设备的灯拆分为独立 `LIGHT` 设备，
   亮度/色温/颜色等能力按 HA 实体实际能力自动暴露。
-- **空调温控加减**：温度与风速同时支持小度 App 的 `set*` 与
-  `increment/decrement` 步进控制；空调风速按 HA climate 的离散 `fan_mode`
-  档位（如 20/40/…/100/auto）映射，不再依赖不存在的 `percentage`。
+- **空调温控加减**：温度与风速同时支持小度 App/语音的 `set*` 与
+  `increment/decrement`；语音绝对设定 `SetTemperatureRequest` 按官方载荷键
+  `targetTemperature` 解析（含 CELSIUS/FAHRENHEIT 归一）；空调风速按 HA climate
+  的离散 `fan_mode` 档位（如 20/40/…/100/auto）映射，不再依赖不存在的 `percentage`。
+- **空调模式上报**：hvac 模式优先取实体 state（兼容美的等不提供 `hvac_mode`
+  属性的集成），避免制冷中的空调被小度识别为“未知模式”。
 
 ## 要求
 
@@ -153,6 +156,12 @@ Home Assistant :8123
 │   └── translations/
 ├── hacs.json
 ├── pyproject.toml
+├── reference/dueros/            # 小度官方协议归档 + 契约速查/检索（开发参考）
+│   ├── dbp-smart-home-protocol/ # 官方协议原文（自动抓取，勿手改）
+│   ├── contracts/               # 消息 → Payload 契约速查（自动生成）
+│   ├── lookup.py                # 协议检索：契约优先，未命中回退原文切片
+│   ├── verify_conversion.py     # 抓原文自检转换保真度
+│   └── README.md
 └── tests/
 ```
 
@@ -163,6 +172,16 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[test]"
 pytest
+```
+
+### 协议参考（改动 DuerOS 协议前先读）
+
+本地归档了小度官方「智能家居协议」全文与自动生成的契约速查（见 `reference/dueros/README.md`）。
+改动 `xiaodu_bridge` 中任何 DuerOS 消息/字段/能力前，先用契约优先的检索定位，不要整篇读大文件：
+
+```bash
+python3 reference/dueros/lookup.py SetTemperature   # 契约速查 + 原文指针
+python3 reference/dueros/lookup.py 空调 --grep       # 契约未覆盖时回退原文切片
 ```
 
 仓库启用以下 GitHub Actions：
