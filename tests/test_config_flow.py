@@ -113,4 +113,5 @@ async def test_options_flow_hub_menu(hass) -> None:
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "manage"
 
-    await hass.config_entries.options.async_abort(result["flow_id"])
+    # ``async_abort`` is a synchronous callback on the options flow manager.
+    hass.config_entries.options.async_abort(result["flow_id"])

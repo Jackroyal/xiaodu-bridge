@@ -305,7 +305,7 @@ class StateReportManager:
         """Rebuild the entity index and attribute snapshots."""
         if reset_cooldowns:
             for handle in self._handles.values():
-                handle.cancel()
+                handle()  # async_call_later returns a callable cancel handle
             self._handles.clear()
             self._pending.clear()
             self._confirmed.clear()
@@ -371,7 +371,7 @@ class StateReportManager:
             self.update_unsub()
             self.update_unsub = None
         for handle in self._handles.values():
-            handle.cancel()
+            handle()  # async_call_later returns a callable cancel handle
         self._handles.clear()
         self._pending.clear()
         self._confirmed.clear()
