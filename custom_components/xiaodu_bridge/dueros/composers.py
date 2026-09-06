@@ -207,8 +207,12 @@ def power_mapping(
         actions=tuple(DuerAction(a, capability_key) for a in actions),
     )
 
-    def read(ctx: ReadContext) -> AttributeValue:
-        state = ctx.entities["power"]
+    def read(ctx: ReadContext) -> AttributeValue | None:
+        # The bound entity may already be gone (removed while a report is
+        # being computed): omit the attribute instead of raising KeyError.
+        state = ctx.entities.get("power")
+        if state is None:
+            return None
         on = power_predicate(state) if power_predicate is not None else is_powered_on(state)
         return _turn_on_state_attr(on)
 

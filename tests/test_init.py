@@ -1,10 +1,10 @@
 """Tests for Xiaodu setup/unload."""
 
+import asyncio
+
 import pytest
 
 pytest.importorskip("pytest_homeassistant_custom_component")
-
-from datetime import timedelta
 
 
 @pytest.fixture(autouse=True)
@@ -20,10 +20,22 @@ async def _setup_http(hass):
 
     await async_setup_component(hass, "http", {})
 
+
+@pytest.fixture(autouse=True)
+def _no_structure_debounce(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse the 2s structure-refresh debounce to 0 for deterministic tests.
+
+    Modern HA schedules one-shot timers (async_call_later / *_point_in_*_time)
+    on the real event loop, so advancing HA's virtual clock no longer fires
+    them; a 0s debounce runs on the next loop iteration instead.
+    """
+    monkeypatch.setattr(
+        "custom_components.xiaodu_bridge.STRUCTURE_REFRESH_DEBOUNCE_SECONDS", 0
+    )
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.util import dt as dt_util
 
 from custom_components.xiaodu_bridge import (
     async_remove_config_entry_device,
@@ -42,7 +54,7 @@ from custom_components.xiaodu_bridge.const import (
     DATA_STRUCTURE_UNSUBS,
     DOMAIN,
 )
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 def _entry_data() -> dict:
@@ -164,8 +176,8 @@ async def test_remove_config_entry_device(hass: HomeAssistant) -> None:
 
 
 async def _advance_past_debounce(hass: HomeAssistant) -> None:
-    """Fire the debounced device-set refresh (2s) and let callbacks run."""
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=3))
+    """Run the (0-second) debounced device-set refresh and let callbacks run."""
+    await asyncio.sleep(0)
     await hass.async_block_till_done()
 
 
