@@ -10,6 +10,7 @@ import asyncio
 from tests._dueros_loader import load_enhanced
 
 protocol, enhanced_mod = load_enhanced()
+from xiaodu.dueros.model import make_device_id
 
 NAMESPACE_DISCOVERY = protocol.NAMESPACE_DISCOVERY
 NAMESPACE_CONTROL = protocol.NAMESPACE_CONTROL
@@ -105,11 +106,16 @@ def test_discovery_merges_enhanced_and_skips_legacy_yuba():
     enhanced_yuba = [a for a in appliances if a["modelName"] == "YUBA" and a["applianceId"].startswith("dueros-")]
     assert enhanced_yuba
     # ... and the legacy entity-id yuba function switches are NOT re-emitted
-    # (no duplicate); the bathroom light is its own separate LIGHT device.
+    # (no duplicate); the bathroom light is its own separate LIGHT device whose
+    # id is now a stable hashed id (device base + stable sub), not the
+    # renameable entity id.
     assert "switch.heating" not in ids
-    light_app = [a for a in appliances if a["applianceTypes"] == ["LIGHT"] and a["applianceId"] == "light.yuba"]
-    assert light_app
-    # legacy non-yuba device still present.
+    enhanced = hass.data[DOMAIN][DATA_ENHANCED_DEVICES]
+    yuba_light = next(d for d in enhanced.all() if d.primary_entity_id == "light.yuba")
+    assert yuba_light.profile_key == "light"
+    assert yuba_light.device_id != "light.yuba"
+    assert yuba_light.device_id in ids
+    # legacy non-yuba device still present (ungrouped -> entity-id appliance).
     assert "light.bedroom" in ids
     # enhanced yuba advertises the YUBA action set.
     assert "setGear" in enhanced_yuba[0]["actions"]
@@ -158,8 +164,10 @@ def test_auto_detect_and_default_light_enrolled():
     enhanced = enhanced_mod.build_enhanced_device_set(states, {}, device_of=_device_of())
     assert enhanced
     assert any(d.profile_key == "YUBA" for d in enhanced.all())
-    # A plain light device (no profile) is now ALSO enrolled through the
-    # generic builder (device_id == entity_id), not left to a legacy path.
+    # A plain light device (no profile) is enrolled through the generic
+    # builder. With no device-registry base (device_of returns the entity id)
+    # there is nothing stable to hash on, so its appliance id stays the
+    # entity id (legacy fallback).
     light_only = [
         FakeState("light.yeelink_cn_751118878_bslamp2_s_2_light", "off", {"friendly_name": "床头灯"}),
     ]
@@ -175,3 +183,43 @@ def test_auto_detect_and_default_light_enrolled():
     resp = run(protocol.handle_request(hass, None, _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {})))
     ids = {a["applianceId"] for a in resp["payload"]["discoveredAppliances"]}
     assert "light.bedroom" in ids
+
+
+def _yuba_light_group(light_entity_id):
+    """A YUBA device whose unclaimed light surfaces through the leftover path."""
+    return [
+        FakeState(light_entity_id, "on", {"friendly_name": "浴室灯"}),
+        FakeState("switch.heating", "on", {"friendly_name": "取暖"}),
+        FakeState("switch.blow", "off", {"friendly_name": "吹风"}),
+    ]
+
+
+def test_leftover_device_id_stable_across_rename_and_distinct_from_profile():
+    """The leftover (generic) appliance on a profile device has a stable id."""
+
+    def build(light_entity_id):
+        states = _yuba_light_group(light_entity_id)
+        # registry unique_id is stable; the lookup is by the *current* entity id.
+        stable = {"switch.heating": "heat-uid", "switch.blow": "blow-uid", light_entity_id: "yuba-light-uid"}
+        return enhanced_mod.build_enhanced_device_set(
+            states,
+            {},
+            device_of=lambda eid: "yuba-device",
+            name_of=lambda key: "浴室浴霸",
+            stable_id_of=lambda eid: stable.get(eid),
+        )
+
+    es1 = build("light.yuba")
+    yuba = next(d for d in es1.all() if d.profile_key == "YUBA")
+    leftover1 = next(d for d in es1.all() if d.profile_key == "light")
+    assert leftover1 is not None
+    assert leftover1.primary_entity_id == "light.yuba"
+    assert leftover1.device_id == make_device_id("light", "yuba-device", "yuba-light-uid")
+    # leftover appliance must not collide with the profile appliance.
+    assert leftover1.device_id != yuba.device_id
+
+    # Entity renamed (new entity id, same registry unique_id) -> same ids.
+    es2 = build("light.yuba_renamed")
+    leftover2 = next(d for d in es2.all() if d.profile_key == "light")
+    assert leftover2.device_id == leftover1.device_id
+    assert leftover2.primary_entity_id == "light.yuba_renamed"

@@ -1175,6 +1175,7 @@ def test_discovery_readonly_capability_selectable():
 def test_query_routes_to_sibling_entity():
     hass = _temp_humidity_hass()
     devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
             hass,
@@ -1182,7 +1183,7 @@ def test_query_routes_to_sibling_entity():
             _request(
                 NAMESPACE_QUERY,
                 "GetHumidityRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "sensor.h"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
@@ -1198,6 +1199,7 @@ def test_query_report_state_aggregates_sibling_attributes():
     sibling), because our changereport push asks DuerOS to re-query."""
     hass = _temp_humidity_hass()
     devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
             hass,
@@ -1208,7 +1210,7 @@ def test_query_report_state_aggregates_sibling_attributes():
                 {
                     "accessToken": "t",
                     "appliance": {
-                        "applianceId": "sensor.h",
+                        "applianceId": aid,
                         "attributeName": "humidity",
                     },
                 },
@@ -1224,6 +1226,7 @@ def test_query_report_state_aggregates_sibling_attributes():
 def test_query_temperature_requires_enabled_capability():
     hass = _temp_humidity_hass()
     devices = _sensor_device_map(hass, {"sensor-dev": ["humidity"]})
+    aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
             hass,
@@ -1231,13 +1234,14 @@ def test_query_temperature_requires_enabled_capability():
             _request(
                 NAMESPACE_QUERY,
                 "GetTemperatureReadingRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "sensor.h"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
     assert result["header"]["name"] == "NotSupportedInCurrentModeError"
 
     devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
             hass,
@@ -1245,7 +1249,7 @@ def test_query_temperature_requires_enabled_capability():
             _request(
                 NAMESPACE_QUERY,
                 "GetTemperatureReadingRequest",
-                {"accessToken": "t", "appliance": {"applianceId": "sensor.h"}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
             ),
         )
     )
@@ -1806,7 +1810,7 @@ def test_discovery_socket_advertises_socket_type():
         )
     )
     appliances = result["payload"]["discoveredAppliances"]
-    assert [a["applianceId"] for a in appliances] == ["switch.plug_on"]
+    assert [a["applianceId"] for a in appliances] == [_device_id_of(devices, "switch.plug_on")]
     assert appliances[0]["applianceTypes"] == ["SOCKET"]
     assert {"turnOn", "turnOff"} <= set(appliances[0]["actions"])
 
@@ -2047,5 +2051,5 @@ def test_climate_device_hides_setting_switches_and_fans():
         )
     )
     appliances = result["payload"]["discoveredAppliances"]
-    assert [a["applianceId"] for a in appliances] == ["climate.ac"]
+    assert [a["applianceId"] for a in appliances] == [_device_id_of(devices, "climate.ac")]
     assert appliances[0]["applianceTypes"] == ["AIR_CONDITION"]
