@@ -138,6 +138,7 @@ def build_enhanced_device_set(
     device_of: Callable[[str], str | None],
     name_of: Callable[[str], str | None] | None = None,
     area_of: Callable[[str], str | None] | None = None,
+    stable_id_of: Callable[[str], str | None] | None = None,
 ) -> EnhancedDeviceSet:
     """Build the DuerOS device set (the only runtime path).
 
@@ -145,6 +146,10 @@ def build_enhanced_device_set(
     is ``None`` every exposable device is enrolled (candidate / fresh view);
     otherwise only the listed devices are enrolled. For each enrolled device a
     profile is preferred; the generic builder handles the rest.
+
+    ``stable_id_of(entity_id)`` resolves an entity to a rename-stable identity
+    (the HA entity-registry ``unique_id``) so generic / leftover appliances keep
+    the same DuerOS appliance id when the entity is renamed.
     """
     _ensure_profiles_registered()
     profiles = REGISTRY.all_profiles()
@@ -181,6 +186,7 @@ def build_enhanced_device_set(
                     domain=getattr(group[0], "domain", ""),
                     states=group,
                     config=config_entry,
+                    stable_id_of=stable_id_of,
                 )
                 _collect(profile.build(ctx), config_entry, devices, claimed)
                 _record_area(start)
@@ -215,6 +221,7 @@ def build_enhanced_device_set(
                     domain=getattr(leftover[0], "domain", ""),
                     states=leftover,
                     config=leftover_config,
+                    stable_id_of=stable_id_of,
                 )
                 _collect(build_default_devices(leftover_ctx), config_entry, devices, claimed)
                 _record_area(start)
@@ -228,6 +235,7 @@ def build_enhanced_device_set(
             domain=getattr(group[0], "domain", ""),
             states=group,
             config=config_entry,
+            stable_id_of=stable_id_of,
         )
         _collect(build_default_devices(ctx), config_entry, devices, claimed)
         _record_area(start)
@@ -249,6 +257,10 @@ def build_enhanced_for_hass(hass: Any, entry: Any) -> EnhancedDeviceSet:
         row = ent_reg.async_get(entity_id)
         return row.device_id if row and row.device_id else None
 
+    def stable_id_of(entity_id: str) -> str | None:
+        row = ent_reg.async_get(entity_id)
+        return row.unique_id if row and row.unique_id else None
+
     def name_of(device_key: str) -> str | None:
         device = device_reg.async_get(device_key)
         return (device.name_by_user or device.name) if device else None
@@ -266,6 +278,7 @@ def build_enhanced_for_hass(hass: Any, entry: Any) -> EnhancedDeviceSet:
         device_of=device_of,
         name_of=name_of,
         area_of=area_of,
+        stable_id_of=stable_id_of,
     )
 
 
@@ -298,6 +311,10 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
         row = ent_reg.async_get(entity_id)
         return row.device_id if row and row.device_id else None
 
+    def stable_id_of(entity_id: str) -> str | None:
+        row = ent_reg.async_get(entity_id)
+        return row.unique_id if row and row.unique_id else None
+
     def name_of(device_key: str) -> str | None:
         device = device_reg.async_get(device_key)
         return (device.name_by_user or device.name) if device else None
@@ -307,6 +324,7 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
         {},
         device_of=device_of,
         name_of=name_of,
+        stable_id_of=stable_id_of,
     )
     grouped: dict[str, list[DuerDevice]] = {}
     for dev in enhanced.all():

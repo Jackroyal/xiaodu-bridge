@@ -293,11 +293,25 @@ class DeviceBuildContext:
     states: list[Any] = field(default_factory=list)
     bindings: dict[str, str] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
+    stable_id_of: Callable[[str], str | None] | None = None
     is_reachable: bool = True
 
     def entity_of(self, role: str) -> str | None:
         """Return the entity id bound to a semantic role, if any."""
         return self.bindings.get(role)
+
+    def stable_sub(self, entity_id: str) -> str:
+        """Return a rename-stable sub-identity for an entity.
+
+        Delegates to the injected ``stable_id_of`` (entity-registry ``unique_id``
+        when available); falls back to the current ``entity_id`` so builders
+        stay deterministic even without a registry resolver.
+        """
+        if self.stable_id_of is not None:
+            stable = self.stable_id_of(entity_id)
+            if stable:
+                return stable
+        return entity_id
 
     def find_state(self, entity_id: str) -> Any | None:
         return next((s for s in self.states if getattr(s, "entity_id", "") == entity_id), None)

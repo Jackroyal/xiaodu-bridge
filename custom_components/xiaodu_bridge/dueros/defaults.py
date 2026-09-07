@@ -47,7 +47,7 @@ from .constants import (
     APPLIANCE_SWITCH,
     APPLIANCE_TV_SET,
 )
-from .model import DeviceBuildContext, DuerDevice
+from .model import DeviceBuildContext, DuerDevice, make_device_id
 
 # Appliance type for a known device class, overriding the domain default.
 _CLASS_APPLIANCE = {
@@ -208,11 +208,37 @@ def _reachable(ctx: DeviceBuildContext, entity_ids: set[str]) -> bool:
     return False
 
 
+def _entity_appliance_id(
+    ctx: DeviceBuildContext, kind: str, entity_id: str
+) -> str:
+    """Stable appliance id for a generic per-entity appliance.
+
+    A real HA device (grouped under a device-registry id) yields a hashed id
+    keyed on the device id plus the entity's rename-stable sub-identity, so
+    renaming the entity does not recreate the DuerOS appliance. A lone
+    *ungrouped* entity has no device-registry base (its group key is its own
+    entity id), so there is nothing stable to anchor on — its id stays the
+    entity id (legacy behaviour; renaming it still recreates the appliance).
+    """
+    if ctx.ha_device_id == entity_id:
+        return entity_id
+    return make_device_id(kind, ctx.ha_device_id, ctx.stable_sub(entity_id))
+
+
 def _sensor_device(
     ctx: DeviceBuildContext,
     query_entities: dict[str, str],
 ) -> DuerDevice | None:
-    """Build a read-only SENSOR appliance from aggregated query capabilities."""
+    """Build a read-only SENSOR appliance from aggregated query capabilities.
+
+    The aggregate's device id is anchored on its *primary* member — the member
+    with the smallest rename-stable sub-identity — so the id only guarantees
+    stability across **renames of existing members** (renaming a member keeps
+    its unique_id, hence its sub-identity). Adding or removing members is a
+    different story: deleting the current primary, or adding a member whose
+    sub-identity sorts before it, displaces the primary and therefore yields a
+    new aggregate id. That is expected semantics, not a stability bug.
+    """
     device_enabled = _device_enabled(ctx.config)
     mappings = []
     entity_ids: set[str] = set()
@@ -228,9 +254,14 @@ def _sensor_device(
         entity_ids.add(entity_id)
     if not mappings:
         return None
-    primary = min(entity_ids) if entity_ids else ""
+    # Deterministic aggregation order uses the *stable* member identities, so
+    # renaming a member sensor does not reshuffle / re-identify the aggregate;
+    # the entity_id tie-break keeps members with equal stable_sub fully ordered
+    # across restarts (Python hash-randomises set iteration, not the sort key).
+    members = sorted(entity_ids, key=lambda eid: (ctx.stable_sub(eid), eid))
+    primary = members[0] if members else ""
     return DuerDevice(
-        device_id=primary,
+        device_id=_entity_appliance_id(ctx, "SENSOR", primary),
         friendly_name=ctx.device_name,
         profile_key="SENSOR",
         primary_entity_id=primary,
@@ -344,11 +375,12 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         mappings = [m for m in mappings if m.key in enabled]
         if not mappings:
             continue
+        kind = getattr(entity, "domain", "")
         devices.append(
             DuerDevice(
-                device_id=entity_id,
+                device_id=_entity_appliance_id(ctx, kind, entity_id),
                 friendly_name=ctx.device_name,
-                profile_key=getattr(entity, "domain", ""),
+                profile_key=kind,
                 primary_entity_id=entity_id,
                 capabilities=tuple(mappings),
                 is_reachable=_reachable(ctx, {entity_id}),
