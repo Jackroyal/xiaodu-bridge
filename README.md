@@ -4,6 +4,8 @@
 [![Hassfest](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml)
 [![HACS Validation](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml)
 
+> English: [README.en.md](README.en.md)
+
 让 Home Assistant 中的设备被小度音箱 / 小度 App 发现、查询与控制。
 
 > **名称说明**：本集成的商店名称为 `xiaodu bridge`，domain 为 `xiaodu_bridge`
@@ -133,7 +135,74 @@ Home Assistant :8123
 /api/xiaodu/service
 ```
 
-## 设备与能力
+## 支持的设备、属性与能力
+
+本集成把 HA 实体映射为 DuerOS 语义设备，分「专用档案」与「通用能力合成」两类。
+
+### 设备类型
+
+**专用档案（复合设备）** —— 一个物理设备合成一个或多个 DuerOS appliance：
+
+| 设备 | DuerOS 类型 | 合成能力 |
+|---|---|---|
+| 浴霸 | `YUBA` | 开关（取暖 / 吹风 / 换气）、模式（`HEAT` / `FAN` / `VENTILATION`）、暖风档位、风速、目标温度 |
+| 晾衣架 | `CLOTHES_RACK` | 开关（升降）、位置、暂停、模式（`DRYING` / `DISINFECT`） |
+| 扫地机器人 | `SWEEPING_ROBOT` | 开关、暂停、吸力、电量 |
+| 洗衣机 | `WASHING_MACHINE` | 电源（开 / 关 / 启动）、洗涤模式、水位、目标温度、运行状态、剩余时间 |
+
+浴霸、晾衣架的灯不并入复合设备（DuerOS 无对应动作），而是拆分为独立的 `LIGHT`
+设备，亮度 / 色温 / 颜色按实体实际能力自动暴露。
+
+**通用能力合成** —— 按 HA 实体域映射：
+
+| HA 域 | DuerOS 类型 | 能力 |
+|---|---|---|
+| `light` | `LIGHT` | 开关、亮度、色温、颜色 |
+| `switch` | `SWITCH` | 开关 |
+| 插座（`plug` / 名称含「插座」） | `SOCKET` | 开关 |
+| `fan` | `FAN` | 开关、风速 |
+| `climate` | `AIR_CONDITION` | 开关、目标温度、模式、风速 |
+| `cover` | `CURTAIN` | 开关、位置、暂停 |
+| `media_player` | `TV_SET` | 开关、音量、静音、频道 |
+| `humidifier` | `HUMIDIFIER` | 开关、目标湿度、模式 |
+| `sensor` | `SENSOR` | 温度、湿度（只读） |
+
+> `vacuum` 域由「扫地机器人」档案接管。指示 / 童锁 / 夜灯 / 故障等状态实体
+> （`indicator`、`child_lock`、`night_light`、`fault` 等）不会暴露给音箱。
+
+### 能力清单
+
+| 能力 key | 中文 | 类型 | DuerOS 属性 |
+|---|---|---|---|
+| `power` | 开关 | 控制 | `turnOnState` |
+| `brightness` | 亮度 | 控制 | `brightness` |
+| `colorTemperature` | 色温 | 控制 | `colorTemperatureInKelvin` |
+| `color` | 颜色 | 控制 | `color` |
+| `volume` | 音量 | 控制 | `volume` |
+| `mute` | 静音 | 控制 | `muteState` |
+| `channel` | 频道 | 控制 | `channel` |
+| `fanSpeed` | 风速 | 控制 | `fanSpeed` |
+| `targetTemperature` | 目标温度 | 控制 | `targetTemperature` |
+| `targetHumidity` | 目标湿度 | 控制 | `targetHumidity` |
+| `mode` | 模式 | 控制 | `mode` |
+| `percentage` | 位置 | 控制 | `percentage` |
+| `suction` | 吸力 | 控制 | `suction` |
+| `waterLevel` | 水量 / 水位 | 控制 | `waterLevel` |
+| `pause` | 暂停 | 控制 | `pauseState` |
+| `continue` | 继续 | 控制 | — |
+| `temperature` | 温度 | 只读 | `temperature` |
+| `humidity` | 湿度 | 只读 | `humidity` |
+| `warmthLevel` | 暖风档位 | 控制 | `warmthLevel` |
+| `electricityCapacity` | 电量 | 只读 | `electricityCapacity` |
+| `workState` | 运行状态 | 只读 | `workState` |
+| `timeLeft` | 剩余时间 | 只读 | `timeLeft` |
+
+控制类能力映射为 DuerOS 动作（`turnOn` / `turnOff` / `set*` / `increment*` /
+`decrement*` / `pause` / `continue` / `timingTurnOn` / `timingTurnOff` 等）；只读
+能力仅作为属性，供 Query 查询。传感器温度按 HA 单位系统归一化上报（公制即统一
+摄氏度）；`unknown` / `unavailable` 等非数值读数不产生属性。
+
+## 配置设备与能力
 
 添加集成后，打开集成条目选择 **设备与能力**：
 
@@ -147,7 +216,7 @@ Home Assistant :8123
 
 ```text
 .
-├── .github/workflows/          # Hassfest 与 HACS 校验
+├── .github/workflows/          # Hassfest、HACS 与 Tests 校验
 ├── custom_components/xiaodu_bridge/
 │   ├── __init__.py             # 集成入口 / unload / 中枢设备注册
 │   ├── config_flow.py          # 配置流与设备 → 能力选项流
@@ -195,6 +264,7 @@ python3 reference/dueros/lookup.py 空调 --grep       # 契约未覆盖时回�
 
 - Home Assistant **Hassfest** 校验。
 - **HACS Integration** 校验。
+- **Tests**：pytest 单元/集成测试、ruff 静态检查、manifest ↔ pyproject 版本一致性校验。
 
 ## 日志
 
