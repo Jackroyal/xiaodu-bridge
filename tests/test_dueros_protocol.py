@@ -87,9 +87,10 @@ def run(coro):
 def _seed_enhanced(hass, config=None, device_of=None, name_of=None, area_of=None, sync_areas=False):
     """Build an EnhancedDeviceSet for the fake states and cache it in hass.data.
 
-    ``config`` follows the new ``CONF_DEVICES`` shape (device_key -> enabled
-    capability keys), matching the device→capability options UI. ``area_of``
-    supplies an optional HA room name and ``sync_areas`` toggles room grouping.
+    ``config`` follows the new ``CONF_DEVICES`` shape (device_key -> object
+    ``{caps, bindings, hidden, names, mode}``), matching the options UI.
+    ``area_of`` supplies an optional HA room name and ``sync_areas`` toggles
+    room grouping.
     """
     options = {"sync_areas": sync_areas}
     if config is not None:
@@ -133,7 +134,7 @@ def _device_map(hass, entity_ids=None, caps=None, name_of=None):
     config = None
     if entity_ids is not None:
         selected = list(all_caps if caps is None else caps)
-        config = {eid: selected for eid in entity_ids}
+        config = {eid: {"caps": selected} for eid in entity_ids}
     return _seed_enhanced(hass, config=config, name_of=name_of)
 
 
@@ -587,7 +588,7 @@ def test_discovery_groups_sync_areas_generates_area_groups():
     hass = _hass()
     devices = _seed_enhanced(
         hass,
-        config={"light.living": ["brightness"], "switch.plug": []},
+        config={"light.living": {"caps": ["brightness"]}, "switch.plug": {"caps": []}},
         device_of=lambda eid: None,
         area_of=lambda key: {"light.living": "卧室", "switch.plug": "卧室"}.get(key),
         sync_areas=True,
@@ -606,7 +607,7 @@ def test_discovery_groups_sanitizes_area_names():
     hass = _hass()
     devices = _seed_enhanced(
         hass,
-        config={"light.living": []},
+        config={"light.living": {"caps": []}},
         device_of=lambda eid: None,
         area_of=lambda key: "卧室！·（1）",
         sync_areas=True,
@@ -620,7 +621,7 @@ def test_discovery_groups_empty_when_sync_areas_off():
     hass = _hass()
     devices = _seed_enhanced(
         hass,
-        config={"light.living": []},
+        config={"light.living": {"caps": []}},
         device_of=lambda eid: None,
         area_of=lambda key: "卧室",
         sync_areas=False,
@@ -1143,7 +1144,7 @@ def _temp_humidity_hass():
 def test_discovery_thermohygrometer_unions_readonly_attributes():
     # Empty legacy selection on a read-only device exposes all read-only caps.
     hass = _temp_humidity_hass()
-    devices = _sensor_device_map(hass, {"sensor-dev": []})
+    devices = _sensor_device_map(hass, {"sensor-dev": {"caps": []}})
     result = run(
         handle_request(
             hass,
@@ -1158,7 +1159,7 @@ def test_discovery_thermohygrometer_unions_readonly_attributes():
 
 def test_discovery_readonly_capability_selectable():
     hass = _temp_humidity_hass()
-    devices = _sensor_device_map(hass, {"sensor-dev": ["humidity"]})
+    devices = _sensor_device_map(hass, {"sensor-dev": {"caps": ["humidity"]}})
     result = run(
         handle_request(
             hass,
@@ -1174,7 +1175,7 @@ def test_discovery_readonly_capability_selectable():
 
 def test_query_routes_to_sibling_entity():
     hass = _temp_humidity_hass()
-    devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    devices = _sensor_device_map(hass, {"sensor-dev": {"caps": ["temperature", "humidity"]}})
     aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
@@ -1198,7 +1199,7 @@ def test_query_report_state_aggregates_sibling_attributes():
     attribute set (humidity from the requested unit + temperature from its
     sibling), because our changereport push asks DuerOS to re-query."""
     hass = _temp_humidity_hass()
-    devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    devices = _sensor_device_map(hass, {"sensor-dev": {"caps": ["temperature", "humidity"]}})
     aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
@@ -1225,7 +1226,7 @@ def test_query_report_state_aggregates_sibling_attributes():
 
 def test_query_temperature_requires_enabled_capability():
     hass = _temp_humidity_hass()
-    devices = _sensor_device_map(hass, {"sensor-dev": ["humidity"]})
+    devices = _sensor_device_map(hass, {"sensor-dev": {"caps": ["humidity"]}})
     aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
@@ -1240,7 +1241,7 @@ def test_query_temperature_requires_enabled_capability():
     )
     assert result["header"]["name"] == "NotSupportedInCurrentModeError"
 
-    devices = _sensor_device_map(hass, {"sensor-dev": ["temperature", "humidity"]})
+    devices = _sensor_device_map(hass, {"sensor-dev": {"caps": ["temperature", "humidity"]}})
     aid = _device_id_of(devices, "sensor.h")
     result = run(
         handle_request(
@@ -1294,7 +1295,7 @@ def test_light_device_does_not_aggregate_percent_sibling_as_humidity():
     )
     devices = _seed_enhanced(
         hass,
-        config={"lamp-dev": []},
+        config={"lamp-dev": {"caps": []}},
         device_of=lambda eid: "lamp-dev" if eid in ("light.lamp", "sensor.saturability") else eid,
         name_of=lambda key: {"lamp-dev": "床头灯"}.get(key),
     )
@@ -1455,7 +1456,7 @@ def test_discovery_multi_unit_device_exposes_two_appliances():
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
-        config={"rack-dev": {"cover.rack": [], "light.rack_light": []}},
+        config={"rack-dev": {"caps": []}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
     )
@@ -1480,14 +1481,13 @@ def test_discovery_multi_unit_device_exposes_two_appliances():
     assert light["friendlyName"] == "晾衣杆 灯"
 
 
-def test_discovery_legacy_default_all_config_surfaces_leftover_light():
-    # A legacy per-entity dict that only lists the cover with an empty (all)
-    # list means "device enabled, default-all": the unclaimed light must
-    # surface as its own LIGHT appliance instead of being silently dropped.
+def test_discovery_default_all_config_surfaces_leftover_light():
+    # A default-all device (empty ``caps``): the unclaimed light must surface as
+    # its own LIGHT appliance instead of being silently dropped.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
-        config={"rack-dev": {"cover.rack": []}},
+        config={"rack-dev": {"caps": []}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
     )
@@ -1505,15 +1505,13 @@ def test_discovery_legacy_default_all_config_surfaces_leftover_light():
     assert appl["LIGHT"]["friendlyName"] == "晾衣杆 灯"
 
 
-def test_discovery_legacy_narrowed_config_narrows_caps_not_hidden():
-    # A legacy per-entity dict migrates to a device-level ``caps`` union. The
-    # unlisted light is NOT hidden anymore (no hidden inference) so it surfaces
-    # as its own LIGHT appliance — but its caps and the profile's caps are
-    # narrowed by the device-level selection.
+def test_discovery_narrowed_config_narrows_caps_not_hidden():
+    # Device-level ``caps`` narrows both the profile aggregate and the leftover
+    # light; the light stays exposed (not hidden) and surfaces as its own LIGHT.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
-        config={"rack-dev": {"cover.rack": ["percentage"]}},
+        config={"rack-dev": {"caps": ["percentage"]}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
     )
@@ -1537,7 +1535,7 @@ def test_control_multi_unit_light_routes_to_light_entity():
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
-        config={"rack-dev": {"cover.rack": [], "light.rack_light": []}},
+        config={"rack-dev": {"caps": []}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
     )
@@ -1587,7 +1585,7 @@ def _yuba_hass():
 def _yuba_map(hass):
     return _seed_enhanced(
         hass,
-        config={"yuba-dev": []},
+        config={"yuba-dev": {"caps": []}},
         device_of=lambda eid: "yuba-dev",
         name_of=lambda key: "米家智能浴霸N1",
     )
@@ -1922,7 +1920,7 @@ def test_discovery_sensor_device_includes_temp_enabled_under_sibling_entity():
     def device_of(entity_id):
         return DEVICE if entity_id in ("sensor.hum", "sensor.temp", "sensor.batt") else None
 
-    config = {DEVICE: {"sensor.hum": ["temperature", "humidity"]}}
+    config = {DEVICE: {"caps": ["temperature", "humidity"]}}
     hass = FakeHass(states)
     enhanced = _seed_enhanced(hass, config=config, device_of=device_of)
     result = run(
@@ -2052,7 +2050,7 @@ def test_climate_device_hides_setting_switches_and_fans():
     )
     devices = _seed_enhanced(
         hass,
-        config={"ac-dev": []},
+        config={"ac-dev": {"caps": []}},
         device_of=lambda eid: "ac-dev",
         name_of=lambda key: "空调",
     )

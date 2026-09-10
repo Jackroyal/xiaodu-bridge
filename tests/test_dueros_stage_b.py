@@ -79,6 +79,23 @@ def test_no_override_enrolls_every_device_default_all():
     assert any(d.profile_key == "light" for d in es.all())
 
 
+def test_yuba_leftover_limited_to_light():
+    # The bath heater's config/feature switches must not each surface as their
+    # own SWITCH appliance (duplicate controls / NLU ambiguity): the YUBA
+    # profile's ``leftover_domains`` allows only the light.
+    states = _YUBA_STATES + [
+        FakeState("switch.yuba_delay_stop", "off", {"friendly_name": "浴霸风暖 延时停止开关"}),
+        FakeState("switch.yuba_plasma", "off", {"friendly_name": "杀菌 等离子开关"}),
+        FakeState("switch.yuba_night_auto", "off", {"friendly_name": "自动化配置夜灯服务 自动化夜灯开关"}),
+    ]
+    es = _build(states, None, stable=_yuba_stable())
+    assert sorted(d.profile_key for d in es.all()) == ["YUBA", "light"]
+    primaries = {d.primary_entity_id for d in es.all()}
+    assert "switch.yuba_delay_stop" not in primaries
+    assert "switch.yuba_plasma" not in primaries
+    assert "switch.yuba_night_auto" not in primaries
+
+
 def test_empty_devices_dict_enrolls_nothing():
     es = _build(_YUBA_STATES, {}, stable=_yuba_stable())
     assert es.all() == []
@@ -384,7 +401,7 @@ def test_advanced_shape_key_rules():
 
 
 def test_merge_device_obj_normalizes_and_overrides_whole_fields():
-    assert merge_device_obj(["power", "brightness"], None) == {
+    assert merge_device_obj({"caps": ["power", "brightness"]}, None) == {
         "caps": ["power", "brightness"]
     }
     # An overlay replaces whole fields, so empty containers / ``auto`` clear a

@@ -13,8 +13,7 @@ rebuild the set fresh, and the state-report manager refreshes its index only
 when the device structure actually changed.
 
 The runtime model is the DuerOS *semantic* model (``dueros`` package): every
-exposable device is surfaced as one or more ``DuerDevice`` appliances. The
-legacy per-entity (unit) path is no longer used.
+exposable device is surfaced as one or more ``DuerDevice`` appliances.
 
 Following hub-integration conventions (like HomeKit Bridge), the device
 registry holds a single virtual "hub" device; bridged HA devices are not

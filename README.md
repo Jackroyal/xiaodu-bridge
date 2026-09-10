@@ -16,7 +16,7 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.7**。
+当前集成版本：**v0.9.8**。
 
 ## 功能
 

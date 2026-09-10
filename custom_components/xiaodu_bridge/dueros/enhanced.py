@@ -488,14 +488,21 @@ def build_enhanced_device_set(
             _collect(ctx, build_default_devices(ctx), caps, names, devices, claimed)
             _record_area(start)
 
-        def _emit_leftover() -> None:
-            """Surface unclaimed control entities after a matched profile."""
+        def _emit_leftover(profile: Any) -> None:
+            """Surface unclaimed control entities after a matched profile.
+
+            The matched profile may restrict which domains may surface
+            (``leftover_domains``) — e.g. a bath heater exposes only its light,
+            not its config switches.
+            """
+            allow = getattr(profile, "leftover_domains", None)
             leftover = [
                 s for s in group
                 if getattr(s, "entity_id", "") not in claimed
                 and getattr(s, "domain", "") in device_mod.EXPOSABLE_DOMAINS
                 and getattr(s, "domain", "") != "sensor"
                 and not device_mod._is_auxiliary(s)
+                and (allow is None or getattr(s, "domain", "") in allow)
             ]
             if not leftover:
                 return
@@ -533,6 +540,7 @@ def build_enhanced_device_set(
         )
 
         matched = False
+        matched_profile: Any = None
         for profile in (forced,) if forced is not None else profiles:
             if profile.build is None:
                 continue
@@ -557,6 +565,7 @@ def build_enhanced_device_set(
             _collect(ctx, built, caps, names, devices, claimed)
             _record_area(start)
             matched = True
+            matched_profile = profile
             break
 
         if not matched:
@@ -564,8 +573,9 @@ def build_enhanced_device_set(
             continue
         # A profile (auto-detected or forced) was built: its unclaimed control
         # entities (e.g. a YUBA / clothes-rack light) still surface through the
-        # generic builder as their own appliance.
-        _emit_leftover()
+        # generic builder as their own appliance, subject to the profile's
+        # ``leftover_domains`` restriction.
+        _emit_leftover(matched_profile)
 
     return EnhancedDeviceSet(devices, claimed, enabled=True, sync_areas=sync_areas, areas=device_areas)
 

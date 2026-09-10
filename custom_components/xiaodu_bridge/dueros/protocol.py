@@ -364,8 +364,7 @@ async def handle_request(
 
     ``devices`` is kept for signature compatibility (it may be an
     ``EnhancedDeviceSet``); the authoritative source is the enhanced set cached
-    in ``hass.data`` (or built on demand by ``_get_enhanced``). The legacy
-    per-entity path is no longer used by the dispatcher.
+    in ``hass.data`` (or built on demand by ``_get_enhanced``).
     """
     header = data.get("header") or {}
     payload = data.get("payload") or {}

@@ -208,9 +208,8 @@ class XiaoduConfigFlow(ConfigFlow, domain=DOMAIN):
 class XiaoduOptionsFlow(OptionsFlow):
     """Xiaodu options: 设备 → 能力（device → capability）。
 
-    The legacy "unit" (entity-level appliance) concept is removed. Each row is
-    an HA physical device; expanding it shows the capabilities the device can
-    expose to Xiaodu, and the user picks which to enable. The device-center
+    Each row is an HA physical device; expanding it shows the capabilities the
+    device can expose to Xiaodu, and the user picks which to enable. The
     semantic model builds one or more ``DuerDevice`` appliances per device.
     """
 
@@ -351,8 +350,8 @@ class XiaoduOptionsFlow(OptionsFlow):
         self._build_candidates()
         if not self._selected:
             # First visit: mirror the currently configured devices onto the
-            # object schema (legacy list / per-entity dicts migrate here too),
-            # so editing old options and the advanced sub-flows agree on one shape.
+            # object schema so the simple and advanced sub-flows agree on one
+            # shape.
             current = normalize(self.config_entry.options.get(CONF_DEVICES)) or {}
             self._sync_areas = bool(self.config_entry.options.get(CONF_SYNC_AREAS, False))
             self._objects = {key: dict(entry or {}) for key, entry in current.items()}

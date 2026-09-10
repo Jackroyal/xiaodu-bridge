@@ -161,9 +161,6 @@ class XiaoduOAuthStore:
             key: dict(value) for key, value in data.get("tokens", {}).items()
         }
         self._refresh = dict(data.get("refresh", {}))
-        raw = data.get("open_uids") or {}
-        if isinstance(raw, dict):
+        raw = data.get("open_uids")
+        if raw is not None:
             self._open_uids = {str(key): str(value) for key, value in raw.items()}
-        else:
-            # Legacy list format: no user association.
-            self._open_uids = {f"anon-{value}": str(value) for value in raw}

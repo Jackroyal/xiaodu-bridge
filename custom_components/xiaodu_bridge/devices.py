@@ -102,22 +102,9 @@ CAP_LABELS = {
 
 # Device-class classification (platform-agnostic, see ``classify_device``).
 # ``auto`` means "derive the appliance type from the primary entity domain";
-# a concrete class lets a device override that default (e.g. a 晾衣杆 whose
-# HA device is a cover but should surface as a CLOTHES_RACK appliance).
+# SOCKET lets a plug's switch surface with 插座 semantics instead of 开关.
 DEVICE_CLASS_AUTO = "auto"
-DEVICE_CLASS_CLOTHES_RACK = "clothes_rack"
-DEVICE_CLASS_YUBA = "yuba"
 DEVICE_CLASS_SOCKET = "socket"
-
-# Entity ids / device model markers that identify a clothes rack. Kept loose
-# on purpose: Xiaomi Home names the cover entity ``..._airer`` and the model
-# ``micoe.airer.*``; other integrations use ``clothes_rack`` / 晾衣.
-_CLOTHES_RACK_MARKERS = ("airer", "clothesrack", "clothes_rack", "晾衣")
-
-# A bathroom heater (浴霸): the Xiaomi Home model is ``xiaomi.bhf_light.*`` and
-# the device is usually named 浴霸. Classified as the official YUBA appliance so
-# Xiaodu offers 取暖/吹风/换气/照明 modes instead of a pile of raw switches.
-_YUBA_MARKERS = ("bhf", "浴霸")
 
 # Plugs / sockets: the Xiaomi Home model is ``chuangmi.plug.*`` and the device
 # is named 插座. Classified as SOCKET so Xiaodu uses 插座 semantics.
@@ -286,37 +273,9 @@ def classify_device(
         haystack.append(state.entity_id)
         haystack.append(str(state.attributes.get("friendly_name", "")))
     text = " ".join(haystack).lower()
-    if any(marker in text for marker in _YUBA_MARKERS):
-        return DEVICE_CLASS_YUBA
     if any(marker in text for marker in _SOCKET_MARKERS):
         return DEVICE_CLASS_SOCKET
-    if any(marker in text for marker in _CLOTHES_RACK_MARKERS):
-        return DEVICE_CLASS_CLOTHES_RACK
     return DEVICE_CLASS_AUTO
-
-
-def _entity_text(entity: Any) -> str:
-    """Lowercased entity id + friendly name used for capability matching."""
-    name = str((getattr(entity, "attributes", None) or {}).get("friendly_name", ""))
-    return f"{getattr(entity, 'entity_id', '')} {name}".lower()
-
-
-def _yuba_control_entity(entity: Any) -> bool:
-    """Keep only the YUBA master (the bathroom light) as an exposed unit.
-
-    Xiaodu models a bathroom heater as ONE ``YUBA`` appliance: 取暖/吹风/换气
-    are ``mode`` values of that appliance (setMode / unSetMode), not separate
-    devices. Exposing the function switches as standalone SWITCH units would
-    duplicate the controls and make the skill's NLU ambiguous ("打开浴霸取暖"
-    could match both the master's setMode and the raw 暖风 switch). The
-    function switches stay available through the device's ``controls`` map so
-    setMode can target them, but they are never units. Everything else
-    (夜灯开关/延时/杀菌/提示音 config switches) is filtered out as before.
-    """
-    text = _entity_text(entity)
-    if "indicator" in text:
-        return False
-    return getattr(entity, "domain", "") == "light"
 
 
 def _socket_control_entity(entity: Any) -> bool:

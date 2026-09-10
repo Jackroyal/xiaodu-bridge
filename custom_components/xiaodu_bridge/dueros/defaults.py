@@ -4,8 +4,7 @@ Every HA physical device that does not match a declared device profile (YUBA,
 CLOTHES_RACK, WASHING_MACHINE, SWEEPING_ROBOT, ...) is surfaced through this
 builder. It maps the device's entities into one or more ``DuerDevice``
 appliances using the per-domain capability composers, so the protocol layer
-sees the same semantic model as the profile path (no legacy per-entity
-handling).
+sees the same semantic model as the profile path.
 
 A device with several independent control entities (e.g. a light and a plug on
 the same physical device) yields one ``DuerDevice`` per appliance; read-only
@@ -60,12 +59,6 @@ from .model import DeviceBuildContext, DuerDevice, make_device_id
 _MASTER_CONTROL_DOMAINS = ("climate", "humidifier")
 
 # Appliance type for a known device class, overriding the domain default.
-_CLASS_APPLIANCE = {
-    device_mod.DEVICE_CLASS_SOCKET: APPLIANCE_SOCKET,
-    device_mod.DEVICE_CLASS_CLOTHES_RACK: APPLIANCE_CURTAIN,
-    device_mod.DEVICE_CLASS_YUBA: APPLIANCE_LIGHT,
-}
-
 _DOMAIN_APPLIANCE = {
     "light": APPLIANCE_LIGHT,
     "switch": APPLIANCE_SWITCH,
@@ -85,8 +78,6 @@ def _appliance_type(entity: Any, device_class: str) -> str:
         return APPLIANCE_LIGHT
     if domain == "switch" and device_class == device_mod.DEVICE_CLASS_SOCKET:
         return APPLIANCE_SOCKET
-    if device_class in _CLASS_APPLIANCE and domain not in _DOMAIN_APPLIANCE:
-        return _CLASS_APPLIANCE[device_class]
     return _DOMAIN_APPLIANCE.get(domain, APPLIANCE_SWITCH)
 
 
@@ -157,7 +148,7 @@ def _entity_appliance_id(
     renaming the entity does not recreate the DuerOS appliance. A lone
     *ungrouped* entity has no device-registry base (its group key is its own
     entity id), so there is nothing stable to anchor on — its id stays the
-    entity id (legacy behaviour; renaming it still recreates the appliance).
+    entity id, and renaming it recreates the appliance.
     """
     if ctx.ha_device_id == entity_id:
         return entity_id
@@ -277,9 +268,7 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         and getattr(s, "domain", "") != "sensor"
         and not device_mod._is_auxiliary(s)
     ]
-    if device_class == device_mod.DEVICE_CLASS_YUBA:
-        control_entities = [s for s in control_entities if device_mod._yuba_control_entity(s)]
-    elif device_class == device_mod.DEVICE_CLASS_SOCKET:
+    if device_class == device_mod.DEVICE_CLASS_SOCKET:
         filtered = [s for s in control_entities if device_mod._socket_control_entity(s)]
         # Fall back to all non-auxiliary control entities when the main-power
         # switch marker is absent (e.g. a generic plug named ``switch.plug``).

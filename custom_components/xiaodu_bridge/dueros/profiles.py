@@ -362,11 +362,14 @@ _YUBA_ROLES, _YUBA_ROLE_DOMAINS = _resolve_roles(
 YUBA_PROFILE = DuerDeviceProfile(
     key="YUBA",
     appliance_types=("YUBA",),
-    default_capabilities=("power", "mode", "warmthLevel", "fanSpeed", "targetTemperature"),
     build=build_yuba,
     matches=_matches_yuba,
     roles=_YUBA_ROLES,
     role_domains=_YUBA_ROLE_DOMAINS,
+    # Only the bathroom light surfaces besides the YUBA appliance; the heater's
+    # config/feature switches (延时停止 / 等离子 / 杀菌 / 夜灯自动化 …) must not
+    # each become their own SWITCH appliance (duplicate controls, NLU ambiguity).
+    leftover_domains=("light",),
 )
 
 
@@ -437,7 +440,6 @@ _SWEEP_ROLES, _SWEEP_ROLE_DOMAINS = _resolve_roles(("robot", "battery"))
 SWEEPING_ROBOT_PROFILE = DuerDeviceProfile(
     key="SWEEPING_ROBOT",
     appliance_types=(APPLIANCE_SWEEPING_ROBOT,),
-    default_capabilities=("power", "pause", "suction", "electricityCapacity"),
     build=build_sweeping_robot,
     matches=_matches_sweeping_robot,
     roles=_SWEEP_ROLES,
@@ -507,7 +509,6 @@ _RACK_ROLES, _RACK_ROLE_DOMAINS = _resolve_roles(("cover", "dry", "uv"))
 CLOTHES_RACK_PROFILE = DuerDeviceProfile(
     key="CLOTHES_RACK",
     appliance_types=(APPLIANCE_CLOTHES_RACK,),
-    default_capabilities=("power", "percentage", "pause", "mode"),
     build=build_clothes_rack,
     matches=_matches_clothes_rack,
     roles=_RACK_ROLES,
@@ -607,7 +608,6 @@ _WASH_ROLES, _WASH_ROLE_DOMAINS = _resolve_roles(
 WASHING_MACHINE_PROFILE = DuerDeviceProfile(
     key="WASHING_MACHINE",
     appliance_types=(APPLIANCE_WASHING_MACHINE,),
-    default_capabilities=("power", "mode", "waterLevel", "targetTemperature", "workState", "timeLeft"),
     build=build_washing_machine,
     matches=_matches_washing_machine,
     roles=_WASH_ROLES,

@@ -327,17 +327,17 @@ class DuerDeviceProfile:
     This is a *declarative* profile. Concrete profiles (YUBA, WASHING_MACHINE,
     CLOTHES_RACK, ...) are instantiated in ``dueros.profiles``; they register
     their ``CapabilityMapping`` objects via ``dueros.registry``.
-
-    ``suggest_bindings`` is purely a UI hint (whether a HA device *looks* like
-    this profile) and must never be the source of truth — the user may override.
     """
 
     key: str
     appliance_types: tuple[str, ...] = ()
-    default_capabilities: tuple[str, ...] = ()
-    suggest_bindings: Callable[[Any, dict[str, Any]], bool] | None = None
     build: Callable[["DeviceBuildContext"], list["DuerDevice"]] | None = None
     matches: Callable[[Any], bool] | None = None
+    # Domains allowed to surface as "leftover" generic appliances from the
+    # entities this profile did not claim (``None`` = no restriction). A bath
+    # heater declares ``("light",)`` so its config/feature switches are not each
+    # exposed to Xiaodu as their own SWITCH appliance.
+    leftover_domains: tuple[str, ...] | None = None
     # UI metadata (declared fields, not behaviour): semantic role -> Chinese
     # label and the HA domains a role may be bound to. The options flow uses
     # ``role_domains`` to filter binding candidates so a role is never bound to
