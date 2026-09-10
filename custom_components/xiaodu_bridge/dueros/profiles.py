@@ -168,21 +168,17 @@ def _reachable(ctx: DeviceBuildContext, entity_ids: list[str]) -> bool:
 # --- profile auto-match (confident, used for the default path) -----------------
 
 def _matches_yuba(states: Any) -> bool:
-    """A bathroom heater has a light plus heating/blow/ventilation switches."""
-    has_light = False
-    has_fn = False
-    for s in states:
-        text = _entity_text(s)
-        if any(x in text for x in ("indicator", "night", "夜灯", "指示灯")):
-            continue
-        if _domain(s) == "light":
-            has_light = True
-        if _domain(s) == "switch" and any(
-            m in getattr(s, "entity_id", "").lower()
-            for m in ("heating", "blow", "ventilation")
-        ):
-            has_fn = True
-    return has_light and has_fn
+    """A bathroom heater has heating / blow / ventilation function switches.
+
+    The light is deliberately *not* required: it surfaces as its own LIGHT
+    appliance via ``leftover_domains``. Reusing ``match_role`` keeps the
+    Chinese/English markers in one place (``_ROLE_RULES``).
+    """
+    return any(
+        match_role(s, role)
+        for s in states
+        for role in ("heating", "blow", "ventilation")
+    )
 
 
 def _matches_sweeping_robot(states: Any) -> bool:
@@ -200,12 +196,8 @@ def _matches_clothes_rack(states: Any) -> bool:
 
 
 def _matches_washing_machine(states: Any) -> bool:
-    for s in states:
-        if _domain(s) == "select" and any(
-            m in getattr(s, "entity_id", "").lower() for m in ("wash", "wash_mode")
-        ):
-            return True
-    return False
+    """A washing machine has a wash-program selector (by entity id or name)."""
+    return any(match_role(s, "wash_mode") for s in states)
 
 
 # --- YUBA (浴霸) --------------------------------------------------------------

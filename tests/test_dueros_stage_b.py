@@ -103,17 +103,31 @@ def test_empty_devices_dict_enrolls_nothing():
 
 # --- hidden ------------------------------------------------------------------
 
-def test_hiding_yuba_light_falls_back_to_generic():
-    # Removing the light means _matches_yuba no longer holds -> generic path.
+def test_hiding_yuba_light_keeps_yuba_but_no_leftover_light():
+    # Hiding the light must NOT degrade the whole device to generic: the YUBA
+    # profile matches on its function switches, and the hidden light simply
+    # produces no leftover LIGHT appliance.
     es = _build(
         _YUBA_STATES,
         {"yuba-dev": {"hidden": ["light.yuba"]}},
         stable=_yuba_stable(),
     )
-    assert _by_profile(es, "YUBA") == []
-    # The function switches surface as plain SWITCH appliances.
-    assert any(d.profile_key == "switch" and d.primary_entity_id == "switch.heating"
-               for d in es.all())
+    assert len(_by_profile(es, "YUBA")) == 1
+    assert _by_profile(es, "light") == []
+
+
+def test_yuba_matches_chinese_named_function_switch():
+    # Function switches carrying only Chinese names (no English entity-id
+    # markers) must still match the YUBA profile via the role rules.
+    states = [
+        FakeState("light.main", "on", {"friendly_name": "浴室灯"}),
+        FakeState("switch.fn_a", "on", {"friendly_name": "暖风"}),
+        FakeState("switch.fn_b", "off", {"friendly_name": "吹风"}),
+        FakeState("switch.fn_c", "off", {"friendly_name": "换气"}),
+    ]
+    es = _build(states, None, stable=None)
+    assert len(_by_profile(es, "YUBA")) == 1
+    assert any(d.profile_key == "light" for d in es.all())
 
 
 def test_hidden_entity_stays_out_of_leftover():
