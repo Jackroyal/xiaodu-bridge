@@ -86,19 +86,19 @@ def _access_log(kind: str, **fields: Any) -> None:
 DATA_VIEWS_REGISTERED = "views_registered"
 DATA_OAUTH_STORE = "oauth_store"
 DATA_OAUTH_STORAGE = "oauth_storage"
+DATA_AUTH_SESSIONS = "auth_sessions"
+DATA_FAILED_ATTEMPTS = "failed_attempts"
 STORAGE_KEY = "xiaodu.oauth_tokens"
 STORAGE_VERSION = 1
 
 # Session / CSRF protection
 SESSION_COOKIE = "xiaodu_auth"
 SESSION_TTL = 300
-_auth_sessions: dict[str, dict[str, Any]] = {}
 
 # Simple per-IP login throttle (the in-process login flow bypasses the
 # http layer's built-in invalid-login tracking).
 LOGIN_ATTEMPT_LIMIT = 5
 LOGIN_ATTEMPT_WINDOW = 60
-_failed_attempts: dict[str, list[float]] = {}
 
 _FIXED_PARAMS = ("response_type", "client_id", "redirect_uri", "state")
 
@@ -217,41 +217,57 @@ def _exposed_device_summary(hass: HomeAssistant, entry: ConfigEntry) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _new_session() -> str:
+def _sessions(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """Return the per-instance authorization session table.
+
+    Lives in ``hass.data`` so its lifecycle matches the config entry: unload
+    tears it down and multiple entries (if ever allowed) stay isolated.
+    """
+    return hass.data.setdefault(DOMAIN, {}).setdefault(DATA_AUTH_SESSIONS, {})
+
+
+def _failures(hass: HomeAssistant) -> dict[str, list[float]]:
+    """Return the per-instance login failure throttle table."""
+    return hass.data.setdefault(DOMAIN, {}).setdefault(DATA_FAILED_ATTEMPTS, {})
+
+
+def _new_session(hass: HomeAssistant) -> str:
     """Create a short-lived authorization session and return its nonce."""
     nonce = secrets.token_urlsafe(24)
-    _auth_sessions[nonce] = {"flow_id": None, "expires_at": time.time() + SESSION_TTL}
+    _sessions(hass)[nonce] = {"flow_id": None, "expires_at": time.time() + SESSION_TTL}
     return nonce
 
 
-def _get_session(nonce: str) -> dict[str, Any] | None:
-    session = _auth_sessions.get(nonce)
+def _get_session(hass: HomeAssistant, nonce: str) -> dict[str, Any] | None:
+    sessions = _sessions(hass)
+    session = sessions.get(nonce)
     if session is None or session["expires_at"] <= time.time():
-        _auth_sessions.pop(nonce, None)
+        sessions.pop(nonce, None)
         return None
     return session
 
 
-def _delete_session(nonce: str) -> None:
-    _auth_sessions.pop(nonce, None)
+def _delete_session(hass: HomeAssistant, nonce: str) -> None:
+    _sessions(hass).pop(nonce, None)
 
 
-def _login_throttled(remote_addr: str) -> bool:
+def _login_throttled(hass: HomeAssistant, remote_addr: str) -> bool:
     """Return True when the client has too many recent failed attempts."""
+    failures = _failures(hass)
     now = time.time()
     attempts = [
-        t for t in _failed_attempts.get(remote_addr, []) if now - t < LOGIN_ATTEMPT_WINDOW
+        t for t in failures.get(remote_addr, []) if now - t < LOGIN_ATTEMPT_WINDOW
     ]
-    _failed_attempts[remote_addr] = attempts
+    failures[remote_addr] = attempts
     return len(attempts) >= LOGIN_ATTEMPT_LIMIT
 
 
-def _record_failure(remote_addr: str) -> None:
-    _failed_attempts.setdefault(remote_addr, []).append(time.time())
+def _record_failure(hass: HomeAssistant, remote_addr: str) -> None:
+    _failures(hass).setdefault(remote_addr, []).append(time.time())
 
 
-def _clear_failures(remote_addr: str) -> None:
-    _failed_attempts.pop(remote_addr, None)
+def _clear_failures(hass: HomeAssistant, remote_addr: str) -> None:
+    _failures(hass).pop(remote_addr, None)
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +373,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
         summary = _exposed_device_summary(hass, entry)
 
         if not submitted:
-            nonce = _new_session()
+            nonce = _new_session(hass)
             return self._page(
                 client_id,
                 redirect_uri,
@@ -371,7 +387,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
             )
 
         remote_addr = request.remote or ""
-        if _login_throttled(remote_addr):
+        if _login_throttled(hass, remote_addr):
             return self._page(
                 client_id,
                 redirect_uri,
@@ -385,7 +401,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
             )
 
         nonce = request.cookies.get(SESSION_COOKIE, "")
-        session = _get_session(nonce)
+        session = _get_session(hass, nonce)
         if session is None:
             return web.Response(text="授权会话已过期，请重新打开授权页。", status=400)
 
@@ -395,7 +411,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
             )
         except (ValueError, KeyError) as err:
             _LOGGER.warning("Xiaodu authorize flow failed: %s", err)
-            _delete_session(nonce)
+            _delete_session(hass, nonce)
             return self._page(
                 client_id,
                 redirect_uri,
@@ -411,7 +427,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
         if result["type"] == "create_entry":
             credentials = result.get("result")
             if credentials is None:
-                _delete_session(nonce)
+                _delete_session(hass, nonce)
                 return self._page(
                     client_id,
                     redirect_uri,
@@ -425,8 +441,8 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
                 )
             user = await hass.auth.async_get_user_by_credentials(credentials)
             user_id = user.id if user else ""
-            _clear_failures(remote_addr)
-            _delete_session(nonce)
+            _clear_failures(hass, remote_addr)
+            _delete_session(hass, nonce)
             _LOGGER.info("Xiaodu bound by user %s", user_id or "unknown")
 
             store = await _get_store(hass)
@@ -442,7 +458,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
             fields = _schema_fields(result.get("data_schema"))
             error = _map_errors(result.get("errors"))
             if error:
-                _record_failure(remote_addr)
+                _record_failure(hass, remote_addr)
             is_login = bool(fields) and fields[0].get("name") in ("username", "password")
             return self._page(
                 client_id,
@@ -457,7 +473,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
             )
 
         # aborted / unexpected
-        _delete_session(nonce)
+        _delete_session(hass, nonce)
         return self._page(
             client_id,
             redirect_uri,

@@ -46,6 +46,8 @@ from .const import (
 )
 
 from .oauth_server import (
+    DATA_AUTH_SESSIONS,
+    DATA_FAILED_ATTEMPTS,
     DATA_VIEWS_REGISTERED,
     XiaoduDuerOSServiceView,
     XiaoduDuerOSView,
@@ -268,4 +270,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if handle is not None:
         handle()
     data.pop(DATA_ENHANCED_DEVICES, None)
+    data.pop(DATA_AUTH_SESSIONS, None)
+    data.pop(DATA_FAILED_ATTEMPTS, None)
     return True
