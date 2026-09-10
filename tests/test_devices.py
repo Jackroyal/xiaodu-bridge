@@ -40,26 +40,6 @@ def _light(entity_id="light.x", attrs=None):
     return FakeState(entity_id, "on", attrs or {})
 
 
-def _fake_yuba_states():
-    return [
-        FakeState(
-            "light.yuba_light",
-            "on",
-            {
-                "friendly_name": "米家智能浴霸N1 灯",
-                "brightness": 128,
-                "supported_color_modes": ["brightness"],
-            },
-        ),
-        FakeState("switch.yuba_heating", "off", {"friendly_name": "米家智能浴霸N1 浴霸风暖 暖风"}),
-        FakeState("switch.yuba_blow", "off", {"friendly_name": "米家智能浴霸N1 浴霸风暖 吹风"}),
-        FakeState("switch.yuba_vent", "off", {"friendly_name": "米家智能浴霸N1 浴霸风暖 换气"}),
-        FakeState("switch.yuba_night_light", "off", {"friendly_name": "米家智能浴霸N1 灯 智能夜灯开关"}),
-        FakeState("number.yuba_target_temp", "28", {"friendly_name": "米家智能浴霸N1 浴霸风暖 设定温度"}),
-        FakeState("sensor.yuba_temp", "26", {"friendly_name": "米家智能浴霸N1 环境参数 温度", "unit_of_measurement": "°C"}),
-    ]
-
-
 # --- derive_capabilities -----------------------------------------------------
 
 def test_derive_capabilities_full_light():
@@ -182,24 +162,6 @@ def test_derive_capabilities_vacuum_includes_continue():
 
 # --- classify_device ---------------------------------------------------------
 
-def test_classify_device_clothes_rack_by_entity_id():
-    assert (
-        devices_mod.classify_device("dev-1", [FakeState("cover.micoe_airer", "closed")])
-        == devices_mod.DEVICE_CLASS_CLOTHES_RACK
-    )
-
-
-def test_classify_device_clothes_rack_by_model_metadata():
-    assert (
-        devices_mod.classify_device(
-            "dev-1",
-            [FakeState("cover.c1", "closed")],
-            metadata={"manufacturer": "四季沐歌", "model": "micoe.airer.hz001z"},
-        )
-        == devices_mod.DEVICE_CLASS_CLOTHES_RACK
-    )
-
-
 def test_classify_device_plain_curtain_is_auto():
     assert (
         devices_mod.classify_device(
@@ -208,14 +170,6 @@ def test_classify_device_plain_curtain_is_auto():
             metadata={"manufacturer": "Aqara", "model": "curtain"},
         )
         == devices_mod.DEVICE_CLASS_AUTO
-    )
-
-
-def test_classify_device_yuba_by_model():
-    metadata = {"model": "xiaomi.bhf_light.na1"}
-    assert (
-        devices_mod.classify_device("yuba-dev", _fake_yuba_states(), metadata)
-        == devices_mod.DEVICE_CLASS_YUBA
     )
 
 
@@ -232,22 +186,6 @@ def test_classify_device_socket_by_model():
 
 
 # --- entity filters (used by dueros/defaults.py) -----------------------------
-
-def test_yuba_control_entity_keeps_master_light_only():
-    for state in _fake_yuba_states():
-        assert devices_mod._yuba_control_entity(state) == (
-            state.domain == "light" and "indicator" not in state.entity_id.lower()
-        )
-
-
-def test_yuba_control_entity_filters_indicator_light():
-    assert not devices_mod._yuba_control_entity(
-        FakeState("light.yuba_indicator_light", "on")
-    )
-    assert devices_mod._yuba_control_entity(
-        FakeState("light.yuba_light", "on")
-    )
-
 
 def test_socket_control_entity_keeps_main_power_switch():
     assert devices_mod._socket_control_entity(

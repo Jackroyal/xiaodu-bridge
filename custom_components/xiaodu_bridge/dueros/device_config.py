@@ -1,11 +1,6 @@
 """Per-device object config: normalization + accessors for ``options[CONF_DEVICES]``.
 
-``CONF_DEVICES`` has historically stored two shapes per ``device_key``::
-
-    {device_key: [cap_key, ...]}            # flat device-level capability list
-    {device_key: {entity_id: [cap_key]}}    # legacy per-entity dict
-
-Stage B evolves each value into an *object* with optional fields::
+``CONF_DEVICES`` stores one *object* per ``device_key``::
 
     {
       "caps": [cap_key, ...],        # empty / absent = default-all; power implicit
@@ -15,23 +10,14 @@ Stage B evolves each value into an *object* with optional fields::
       "mode": "auto" | "generic" | <profile_key>,   # absent = "auto"
     }
 
-Top-level semantics are preserved: a missing ``device_key`` means "not
-selected"; an absent / ``None`` ``devices`` value is the default-all candidate
-view (every device exposed, all capabilities).
+Top-level semantics: a missing ``device_key`` means "not selected"; an absent /
+``None`` ``devices`` value is the default-all candidate view (every device
+exposed, all capabilities). A non-object value is treated as an unconfigured
+default-all device.
 
 This module is the single reader of that shape. Normalization is *read-side and
-idempotent* (it never writes back) and therefore migrates old list / per-entity
-configs on the fly for both runtime building and the options UI. Per-entity
-dicts migrate by *unioning* every entity's capability list into ``caps`` (an
-all-empty table / empty list -> empty ``caps`` = default-all). Hidden entities
-are **never** inferred from the per-entity shape.
-
-Legacy *mixed* per-entity dicts such as ``{A: ["power"], B: []}``: the old
-reader treated B's empty table as "default-all for B", while the union rule
-below deliberately converges to the non-empty union (``["power"]``) — an empty
-entity contributes nothing and only a device whose *every* entity table is
-empty becomes default-all. This is an intentional behaviour tightening on
-migration, not a bug.
+idempotent* (it never writes back): :func:`_clean_object` keeps only the reserved
+keys and lightly coerces each field.
 """
 
 from __future__ import annotations
@@ -46,7 +32,7 @@ DEFAULT_MODE = "auto"
 
 
 def _iter_caps(value: Any) -> tuple[str, ...]:
-    """Return the capability keys of one per-entity / list element."""
+    """Return the capability keys of a stored ``caps`` value."""
     if value is None:
         return ()
     if isinstance(value, (list, tuple)):
@@ -54,16 +40,6 @@ def _iter_caps(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     return ()
-
-
-def _union_caps(mapping: dict[str, Any]) -> list[str]:
-    """Union every per-entity capability list into one device-level list."""
-    seen: list[str] = []
-    for value in mapping.values():
-        for cap in _iter_caps(value):
-            if cap not in seen:
-                seen.append(cap)
-    return seen
 
 
 def _clean_object(raw: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +70,7 @@ def normalize(devices: Any) -> dict[str, Any] | None:
     """Normalize the whole ``options[CONF_DEVICES]`` mapping.
 
     ``None`` passes through (candidate / default-all view). Otherwise returns a
-    ``{device_key: object}`` mapping, migrating every legacy entry.
+    ``{device_key: object}`` mapping.
     """
     if devices is None:
         return None
@@ -104,27 +80,21 @@ def normalize(devices: Any) -> dict[str, Any] | None:
 
 
 def normalize_entry(raw: Any) -> dict[str, Any]:
-    """Normalize one per-device CONF_DEVICES value into the object shape."""
-    if raw is None:
-        return {}
-    if isinstance(raw, (list, tuple)):
-        # Flat device-level capability list (current simple-UI shape).
-        return {"caps": list(_iter_caps(raw))}
+    """Normalize one per-device CONF_DEVICES value into the object shape.
+
+    Only the object shape is recognised; ``None`` or any unexpected non-dict
+    value is treated as an unconfigured (default-all) device.
+    """
     if not isinstance(raw, dict):
-        # Unexpected scalar: treat as an unconfigured (default-all) device.
         return {}
-    if _OBJECT_KEYS & raw.keys():
-        # Already the object shape; keep it (lightly cleaned).
-        return _clean_object(raw)
-    # Legacy per-entity dict: union each entity's capability list into ``caps``.
-    return {"caps": _union_caps(raw)}
+    return _clean_object(raw)
 
 
 def merge_device_obj(stored: Any, adv: dict[str, Any] | None = None) -> dict[str, Any]:
     """Merge a stored per-device object with an advanced-edit overlay.
 
-    ``stored`` may be any legacy shape (flat list / per-entity dict / object /
-    ``None``); it is normalised first (see :func:`normalize_entry`). ``adv`` is
+    ``stored`` is the stored per-device object (or ``None``/missing); it is
+    normalised first (see :func:`normalize_entry`). ``adv`` is
     the object-shape overlay the advanced options form submits (only the
     reserved ``_OBJECT_KEYS`` are honoured and whole fields replace, so an
     explicit empty ``bindings``/``hidden``/``names`` or ``mode: "auto"`` clears

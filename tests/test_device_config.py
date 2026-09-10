@@ -1,9 +1,8 @@
 """Pure-logic tests for the per-device object config normalization/accessors.
 
-Stage B stores ``options[CONF_DEVICES]`` as ``{device_key: {caps, bindings,
-hidden, names, mode}}``. Normalization is read-side: it migrates the legacy
-flat list and per-entity dict shapes on the fly without writing back, and never
-infers ``hidden`` from the per-entity shape.
+``options[CONF_DEVICES]`` stores one object per ``device_key``
+(``{caps, bindings, hidden, names, mode}``). Normalization is read-side and
+keeps only the reserved object keys; a non-object value reads as unconfigured.
 """
 
 from tests._dueros_loader import load_semantic_model
@@ -25,32 +24,18 @@ from xiaodu.dueros.device_config import (
 def test_normalize_none_and_empty():
     assert normalize(None) is None
     assert normalize({}) == {}
-    assert normalize({"dev": []}) == {"dev": {"caps": []}}
+    # A non-object value reads as an unconfigured (default-all) device.
+    assert normalize({"dev": []}) == {"dev": {}}
+    assert normalize({"dev": None}) == {"dev": {}}
 
 
-def test_normalize_flat_list():
-    assert normalize_entry(["power", "brightness"]) == {
-        "caps": ["power", "brightness"]
-    }
-    assert normalize_entry([]) == {"caps": []}
-    assert normalize_entry(()) == {"caps": []}
-
-
-def test_normalize_per_entity_dict_unions_caps():
-    # Legacy per-entity dict: union of every entity's capability list, deduped.
-    raw = {
-        "switch.a": ["power", "brightness"],
-        "switch.b": ["power"],
-        "switch.c": ["colorTemperature"],
-    }
-    assert normalize_entry(raw) == {
-        "caps": ["power", "brightness", "colorTemperature"]
-    }
-
-
-def test_normalize_per_entity_empty_is_default_all():
-    assert normalize_entry({"switch.a": [], "switch.b": []}) == {"caps": []}
-    assert normalize_entry({}) == {"caps": []}
+def test_normalize_non_object_is_unconfigured():
+    assert normalize_entry(None) == {}
+    assert normalize_entry([]) == {}
+    assert normalize_entry(()) == {}
+    assert normalize_entry("power") == {}
+    # A dict with no reserved keys (e.g. a stale entity-keyed table) is empty.
+    assert normalize_entry({"switch.a": ["power"]}) == {}
 
 
 def test_normalize_object_is_kept():
@@ -64,20 +49,8 @@ def test_normalize_object_is_kept():
     assert normalize_entry(raw) == raw
 
 
-def test_normalize_migrates_top_level_mix():
-    assert normalize(
-        {
-            "a": ["power"],
-            "b": {"switch.x": ["temperature"]},
-            "c": {"caps": [], "mode": "YUBA"},
-            "d": None,
-        }
-    ) == {
-        "a": {"caps": ["power"]},
-        "b": {"caps": ["temperature"]},
-        "c": {"caps": [], "mode": "YUBA"},
-        "d": {},
-    }
+def test_normalize_object_drops_unknown_keys():
+    assert normalize_entry({"caps": "power", "stale": 1}) == {"caps": ["power"]}
 
 
 # --- accessors ---------------------------------------------------------------
