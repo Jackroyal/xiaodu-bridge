@@ -1323,9 +1323,14 @@ def _clothes_rack_hass():
 
 
 def _clothes_rack_map(hass, caps=None):
-    """Seed an enhanced set for the 晾衣杆 cover (+ optionally its light)."""
+    """Seed an enhanced set for the 晾衣杆 cover (its light explicitly hidden)."""
     all_caps = [c for c in devices_mod.CAP_LABELS if c != devices_mod.CAP_POWER]
-    config = {"rack-dev": {"cover.rack": list(all_caps if caps is None else caps)}}
+    config = {
+        "rack-dev": {
+            "caps": list(all_caps if caps is None else caps),
+            "hidden": ["light.rack_light"],
+        }
+    }
     return _seed_enhanced(
         hass,
         config=config,
@@ -1500,9 +1505,11 @@ def test_discovery_legacy_default_all_config_surfaces_leftover_light():
     assert appl["LIGHT"]["friendlyName"] == "晾衣杆 灯"
 
 
-def test_discovery_legacy_narrowed_config_keeps_unlisted_entities_hidden():
-    # A legacy per-entity dict with an explicit (non-empty) selection keeps the
-    # per-entity opt-in: an entity absent from the dict must not be exposed.
+def test_discovery_legacy_narrowed_config_narrows_caps_not_hidden():
+    # A legacy per-entity dict migrates to a device-level ``caps`` union. The
+    # unlisted light is NOT hidden anymore (no hidden inference) so it surfaces
+    # as its own LIGHT appliance — but its caps and the profile's caps are
+    # narrowed by the device-level selection.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
@@ -1517,9 +1524,13 @@ def test_discovery_legacy_narrowed_config_keeps_unlisted_entities_hidden():
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
-    ids = [a["applianceId"] for a in result["payload"]["discoveredAppliances"]]
     rack_dev = _find_device(devices, "cover.rack")
-    assert ids == [rack_dev.device_id]
+    light_dev = _find_device(devices, "light.rack_light")
+    ids = [a["applianceId"] for a in result["payload"]["discoveredAppliances"]]
+    assert sorted(ids) == sorted([rack_dev.device_id, light_dev.device_id])
+    # Device-level narrowing is applied to the profile aggregate too.
+    assert {c.key for c in rack_dev.capabilities} == {"power", "percentage"}
+    assert {c.key for c in light_dev.capabilities} == {"power"}
 
 
 def test_control_multi_unit_light_routes_to_light_entity():
@@ -1789,6 +1800,8 @@ def test_control_timing_rejects_invalid_timestamp():
 
 
 def test_discovery_socket_advertises_socket_type():
+    # A plug device: companion/task switches and indicator lights are noise. The
+    # per-device ``hidden`` override keeps only the main power switch exposed.
     hass = FakeHass(
         [
             FakeState("switch.plug_on", "on", {"friendly_name": "米家智能插座2 蓝牙网关版 开关"}),
@@ -1798,7 +1811,7 @@ def test_discovery_socket_advertises_socket_type():
     )
     devices = _seed_enhanced(
         hass,
-        config={"plug-dev": {"switch.plug_on": []}},
+        config={"plug-dev": {"hidden": ["switch.plug_task"]}},
         device_of=lambda eid: "plug-dev",
         name_of=lambda key: "米家智能插座2 蓝牙网关版",
     )

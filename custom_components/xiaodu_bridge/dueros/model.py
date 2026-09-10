@@ -292,6 +292,10 @@ class DeviceBuildContext:
     device_meta: dict[str, str] = field(default_factory=dict)
     states: list[Any] = field(default_factory=list)
     bindings: dict[str, str] = field(default_factory=dict)
+    # The *normalized* per-device object from options[CONF_DEVICES]
+    # (see dueros.device_config). Builders may read it for bindings etc.; the
+    # generic builder no longer filters on it (narrowing is centralized in
+    # enhanced._filter_device).
     config: dict[str, Any] = field(default_factory=dict)
     stable_id_of: Callable[[str], str | None] | None = None
     is_reachable: bool = True
@@ -334,3 +338,10 @@ class DuerDeviceProfile:
     suggest_bindings: Callable[[Any, dict[str, Any]], bool] | None = None
     build: Callable[["DeviceBuildContext"], list["DuerDevice"]] | None = None
     matches: Callable[[Any], bool] | None = None
+    # UI metadata (declared fields, not behaviour): semantic role -> Chinese
+    # label and the HA domains a role may be bound to. The options flow uses
+    # ``role_domains`` to filter binding candidates so a role is never bound to
+    # an entity its capability composer cannot drive (e.g. a YUBA ``heating``
+    # composite_power hardcodes domain "switch").
+    roles: dict[str, str] = field(default_factory=dict)
+    role_domains: dict[str, tuple[str, ...]] = field(default_factory=dict)

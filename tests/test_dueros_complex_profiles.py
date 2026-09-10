@@ -88,11 +88,16 @@ def test_clothes_rack_build_and_mode():
     assert dev.profile_key == "CLOTHES_RACK"
     keys = {c.key for c in dev.capabilities}
     assert {"power", "percentage", "pause", "mode"} <= keys
-    # mode read: uv on -> 杀菌
+    # mode read: uv on -> DISINFECT (DuerOS CLOTHES_RACK mode codes are
+    # English, not the Chinese friendly-name labels).
     mode = next(c for c in dev.capabilities if c.key == "mode")
     entities = {"dry": FakeState("switch.dry", "off"), "uv": FakeState("switch.uv", "on")}
     val = mode.read(types.SimpleNamespace(entities=entities))
-    assert val.value == "杀菌"
+    assert val.value == "DISINFECT"
+    # dry on -> DRYING (and the legalValue only covers present switches).
+    entities = {"dry": FakeState("switch.dry", "on"), "uv": FakeState("switch.uv", "off")}
+    val = mode.read(types.SimpleNamespace(entities=entities))
+    assert val.value == "DRYING"
     # percentage read 60
     pct = next(c for c in dev.capabilities if c.key == "percentage")
     p = pct.read(types.SimpleNamespace(entities={"value": FakeState("cover.airer", "open", {"current_position": 60})}))
