@@ -99,7 +99,11 @@ async def test_options_flow_hub_menu(hass) -> None:
         name="客厅灯",
     )
     er.async_get(hass).async_get_or_create(
-        "switch", "living_lamp", "unique_living_lamp", device_id=device.id
+        "switch",
+        "living_lamp",
+        "unique_living_lamp",
+        suggested_object_id="living_lamp",
+        device_id=device.id,
     )
     hass.states.async_set("switch.living_lamp", "off")
 
@@ -144,7 +148,11 @@ async def test_options_simple_flow_saves_object_schema(hass) -> None:
         name="客厅灯",
     )
     er.async_get(hass).async_get_or_create(
-        "switch", "living_lamp", "unique_living_lamp", device_id=device.id
+        "switch",
+        "living_lamp",
+        "unique_living_lamp",
+        suggested_object_id="living_lamp",
+        device_id=device.id,
     )
     hass.states.async_set("switch.living_lamp", "off")
 
