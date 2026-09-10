@@ -95,20 +95,33 @@ def test_sensor_pair_aggregates_into_single_sensor():
     assert {"temperature", "humidity"} <= caps
 
 
-def test_config_list_narrows_capabilities():
+def test_builder_ignores_config_narrowing():
+    """Capability narrowing moved to enhanced._filter_device.
+
+    The generic builder no longer reads ``ctx.config``: every control entity is
+    built with all its capabilities, and per-device capability selection is
+    applied afterwards (uniformly, profiles included).
+    """
     s = FakeState(
         "light.lamp",
         "on",
-        {"friendly_name": "灯", "brightness": 100, "supported_color_modes": ["brightness"]},
+        {"friendly_name": "灯", "brightness": 100, "supported_color_modes": ["brightness", "color_temp"], "color_temp_kelvin": 4000},
     )
     devs = build_default_devices(_ctx([s], config=["power", "brightness"]))
     d = devs[0]
     keys = {c.key for c in d.capabilities}
+    # Even though the config only selected power+brightness, the builder keeps
+    # colorTemperature; the narrowing is done by enhanced._filter_device.
     assert "power" in keys and "brightness" in keys
-    assert "colorTemperature" not in keys
+    assert "colorTemperature" in keys
 
 
-def test_config_dict_excludes_unselected_entity():
+def test_builder_exposes_every_control_entity_ignoring_per_entity_dict():
+    """Legacy per-entity dicts no longer gate entity exposure here.
+
+    The builder exposes every control entity of the device; hiding an entity is
+    an explicit ``hidden`` override in the per-device object (enhanced layer).
+    """
     cover = FakeState("cover.airer", "closed", {"friendly_name": "晾衣杆"})
     light = FakeState("light.airer_light", "off", {"friendly_name": "晾衣杆 灯"})
     devs = build_default_devices(
@@ -119,16 +132,18 @@ def test_config_dict_excludes_unselected_entity():
             stable_of={"cover.airer": "rack-cover-uid", "light.airer_light": "rack-light-uid"},
         )
     )
-    # Only the cover entity is selected; the light is excluded.
     ids = {d.device_id for d in devs}
     assert make_device_id("cover", "rack-dev", "rack-cover-uid") in ids
-    assert make_device_id("light", "rack-dev", "rack-light-uid") not in ids
+    assert make_device_id("light", "rack-dev", "rack-light-uid") in ids
 
 
-def test_readonly_empty_config_keeps_all_query_caps():
+def test_sensor_builder_keeps_all_query_caps_regardless_of_config():
+    """Sensor aggregation ignores ``ctx.config``; narrowing is centralized."""
     t = FakeState("sensor.t", "20", {"unit_of_measurement": "°C", "device_class": "temperature"})
     h = FakeState("sensor.h", "60", {"unit_of_measurement": "%", "device_class": "humidity"})
-    devs = build_default_devices(_ctx([t, h], ha_device_id="temp-dev", config=[]))
+    devs = build_default_devices(
+        _ctx([t, h], ha_device_id="temp-dev", config=["temperature"])
+    )
     d = devs[0]
     keys = {c.key for c in d.capabilities}
     assert {"temperature", "humidity"} <= keys
@@ -252,3 +267,23 @@ def test_ungrouped_lone_entity_keeps_entity_id_appliance_id():
         _ctx([s], ha_device_id="light.lamp", stable_of={"light.lamp": "lamp-uid-1"})
     )
     assert devs[0].device_id == "light.lamp"
+
+
+def test_humidifier_master_control_hides_settings_switches():
+    """A humidifier device collapses to its master entity — settings toggles
+    (自动熄灯 / 调试…) are not surfaced as standalone switch appliances."""
+    h = FakeState(
+        "humidifier.air",
+        "on",
+        {
+            "friendly_name": "米家纯净式智能加湿器",
+            "humidity": 50,
+            "target_humidity": 60,
+            "mode": "humidity",
+            "available_modes": ["humidity", "auto"],
+        },
+    )
+    s = FakeState("switch.air_display", "on", {"friendly_name": "自动熄灯"})
+    devs = build_default_devices(_ctx([h, s], ha_device_id="air-dev"))
+    assert all(d.primary_entity_id != "switch.air_display" for d in devs)
+    assert len(devs) <= 1

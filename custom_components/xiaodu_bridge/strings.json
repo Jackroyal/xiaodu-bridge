@@ -42,27 +42,64 @@
     "step": {
       "init": {
         "title": "小度中枢",
-        "description": "Select which Home Assistant devices to expose to 小度. Each device is shown with the capabilities it can offer; open a device to pick the capabilities to enable.\n\nExposable devices: {candidate_count}"
+        "description": "选择要暴露给小度的 Home Assistant 设备。每个设备会列出它能提供的能力；点击设备可选择要启用的能力。\n\n可暴露设备数：{candidate_count}"
       },
       "devices": {
         "title": "已选设备",
-        "description": "{count} device(s) selected. Click a device to configure its capabilities.",
+        "description": "已选 {count} 台设备。点击设备可配置其能力。",
         "data": {}
       },
       "manage": {
         "title": "添加 / 移除设备",
-        "description": "Select which devices xiaodu may discover and control.",
+        "description": "选择允许小度发现和控制的设备。",
         "data": {
-          "devices": "Devices to expose to xiaodu",
-          "sync_areas": "Sync Home Assistant rooms to xiaodu"
+          "devices": "暴露给小度的设备",
+          "sync_areas": "同步 HA 房间到小度"
         }
       },
       "edit_device": {
         "title": "设备能力",
-        "description": "Configure \"{device_name}\".\n\n开关能力始终启用，不可取消。",
+        "description": "配置「{device_name}」。\n\n开关能力始终启用，不可取消。",
         "data": {
-          "capabilities": "要启用的能力（多选）"
+          "capabilities": "要启用的能力（多选）",
+          "action": "操作"
         }
+      },
+      "device_advanced": {
+        "title": "高级配置",
+        "description": "「{device_name}」的覆写配置。\n\n- 能力（多选）：默认全选 = 全部启用（含以后新增的能力）；取消勾选以限制暴露的能力；电源始终启用。\n- 隐藏实体：被选中的实体不会暴露给小度（角色自动识别 / 聚合 / leftover 都会跳过它）。\n- 形态：把本设备强制按「单个设备拆分」或指定设备类型构建；强制形态构建不出设备时自动回退为拆分。\n- 角色绑定：把某个语义角色绑定到具体实体（选「自动识别」表示不绑定）。\n- 设备改名：可单独修改某个小度设备的展示名，不影响 Home Assistant 实体名。",
+        "data": {
+          "capabilities": "要启用的能力",
+          "hidden": "隐藏实体（不暴露给小度）",
+          "mode": "构建形态",
+          "action": "操作"
+        },
+        "sections": {
+          "capabilities": {
+            "name": "能力",
+            "description": "本设备暴露给小度的能力；默认全选 = 全部启用（含以后新增的能力）。电源始终启用。"
+          },
+          "hidden_entities": {
+            "name": "隐藏实体",
+            "description": "选中的实体不会暴露给小度（角色自动识别 / 聚合 / leftover 都会跳过它）。"
+          },
+          "build_mode": {
+            "name": "构建形态",
+            "description": "把本设备强制按「单个设备拆分」或指定设备类型构建；构建不出设备时自动回退为拆分。"
+          },
+          "role_bindings": {
+            "name": "角色绑定",
+            "description": "把某个语义角色绑定到具体实体；选「自动识别」表示不绑定。"
+          },
+          "device_names": {
+            "name": "设备改名",
+            "description": "可单独修改某个小度设备的展示名，不影响 Home Assistant 实体名。"
+          }
+        }
+      },
+      "device_menu": {
+        "title": "设备设置",
+        "description": "为「{device_name}」选择要配置的内容：能力或高级设置。"
       }
     }
   }

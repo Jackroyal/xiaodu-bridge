@@ -11,6 +11,11 @@ A device with several independent control entities (e.g. a light and a plug on
 the same physical device) yields one ``DuerDevice`` per appliance; read-only
 sensor capabilities (temperature / humidity) are aggregated onto the device's
 default appliance.
+
+This builder is config-agnostic: it exposes every entity of the device with all
+its capabilities. Per-device capability narrowing / hidden-entity filtering /
+name overrides are applied by ``dueros.enhanced`` (``_filter_device`` and the
+per-device object from ``dueros.device_config``), never here.
 """
 
 from __future__ import annotations
@@ -49,6 +54,11 @@ from .constants import (
 )
 from .model import DeviceBuildContext, DuerDevice, make_device_id
 
+# Master control domains that own a whole physical unit: when present they
+# collapse the device to the master entity and hide the settings/toggle
+# siblings those integrations expose (see build_default_devices).
+_MASTER_CONTROL_DOMAINS = ("climate", "humidifier")
+
 # Appliance type for a known device class, overriding the domain default.
 _CLASS_APPLIANCE = {
     device_mod.DEVICE_CLASS_SOCKET: APPLIANCE_SOCKET,
@@ -78,77 +88,6 @@ def _appliance_type(entity: Any, device_class: str) -> str:
     if device_class in _CLASS_APPLIANCE and domain not in _DOMAIN_APPLIANCE:
         return _CLASS_APPLIANCE[device_class]
     return _DOMAIN_APPLIANCE.get(domain, APPLIANCE_SWITCH)
-
-
-def _enabled(config: Any, caps: frozenset[str]) -> frozenset[str]:
-    """Resolve the enabled capability subset for one entity.
-
-    ``None`` or an empty list (candidate / default view) keeps every capability
-    the entity has; a non-empty list filters to it (power always implied for
-    control entities).
-    """
-    if config is None:
-        return frozenset(caps)
-    selected = set(config or ())
-    if not selected:
-        return frozenset(caps)
-    out = selected & set(caps)
-    if "power" in caps:
-        out.add("power")
-    return frozenset(out)
-
-
-def _device_enabled(config: Any) -> frozenset[str] | None:
-    """Device-level enabled capability set from a per-device CONF_DEVICES entry.
-
-    The legacy/migration per-entity dict shape may list a capability under any
-    of the device's entities (e.g. ``temperature`` ticked on the humidity
-    sibling). Capability aggregation (sensors) must therefore honor the device
-    union, not drop a capability because its *owning* entity is not the one the
-    user selected it under. ``None``/empty entry keeps every capability
-    (candidate / default view), mirroring :func:`_enabled`.
-    """
-    if config is None:
-        return None
-    if isinstance(config, dict):
-        if not config:
-            return None
-        selected: set[str] = set()
-        for caps in config.values():
-            sel = set(caps or ())
-            if not sel:
-                return None  # any default-all entity -> device default-all
-            selected |= sel
-        return frozenset(selected)
-    return None if not config else frozenset(config)
-
-
-def _includes(config: Any, entity_id: str) -> tuple[bool, Any]:
-    """Decide whether an entity is exposed and report its per-entity config.
-
-    - ``config is None``: candidate view -> expose every entity, all caps.
-    - ``config`` is a list: device-level selection -> expose every entity,
-      filtered by the list.
-    - ``config`` is a dict: per-entity selection (legacy/migration) -> expose
-      only entities present in the dict, filtered by their list.
-    """
-    if config is None:
-        return True, None
-    if isinstance(config, dict):
-        if entity_id in config:
-            return True, config[entity_id]
-        return False, None
-    return True, config
-
-
-def _entity_config(device_config: Any, entity_id: str) -> list[str] | None:
-    """Return the per-entity capability list from a CONF_DEVICES entry (or None)."""
-    if device_config is None:
-        return None
-    if isinstance(device_config, dict):
-        val = device_config.get(entity_id)
-        return list(val) if val is not None else None
-    return list(device_config)
 
 
 def _query_capabilities(states: list[Any]) -> dict[str, str]:
@@ -239,17 +178,14 @@ def _sensor_device(
     sub-identity sorts before it, displaces the primary and therefore yields a
     new aggregate id. That is expected semantics, not a stability bug.
     """
-    device_enabled = _device_enabled(ctx.config)
     mappings = []
     entity_ids: set[str] = set()
     for capability, entity_id in query_entities.items():
         state = ctx.find_state(entity_id)
         if state is None:
             continue
-        # query_entities already derives each capability from its owning
-        # entity; only the device-level enablement gates aggregation.
-        if device_enabled is not None and capability not in device_enabled:
-            continue
+        # Every query capability whose entity exists is aggregated; per-device
+        # capability narrowing happens later in enhanced._filter_device.
         mappings.append(_sensor_mapping(entity_id, capability, state, (APPLIANCE_SENSOR,)))
         entity_ids.add(entity_id)
     if not mappings:
@@ -348,14 +284,19 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         # Fall back to all non-auxiliary control entities when the main-power
         # switch marker is absent (e.g. a generic plug named ``switch.plug``).
         control_entities = filtered or control_entities
-    elif any(getattr(s, "domain", "") == "climate" for s in control_entities):
-        # A device whose master is a climate (AC / fridge zone) is one
-        # appliance. The Midea AC integrations splits one physical AC into a
-        # climate entity plus many *settings* switches/fans (屏幕显示、电辅热、
-        # 干燥、自清洁、新风 …) — exposing those as standalone SWITCH/FAN
-        # appliances clutters DuerOS. Keep only the climate entity(ies).
+    elif any(
+        getattr(s, "domain", "") in _MASTER_CONTROL_DOMAINS for s in control_entities
+    ):
+        # A device whose master is climate / humidifier (AC, fridge zone,
+        # humidifier) is *one* appliance. Those integrations (Midea AC,
+        # Mi Home humidifier, ...) split one physical unit into a master entity
+        # plus many settings switches/fans (屏幕显示、电辅热、干燥、自清洁、新风、
+        # 自动熄灯、调试 …) — exposing those as standalone SWITCH/FAN appliances
+        # clutters DuerOS. Keep only the master-domain entity(ies).
         control_entities = [
-            s for s in control_entities if getattr(s, "domain", "") == "climate"
+            s
+            for s in control_entities
+            if getattr(s, "domain", "") in _MASTER_CONTROL_DOMAINS
         ]
 
     query_entities = _query_capabilities(states)
@@ -363,18 +304,14 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
 
     for entity in control_entities:
         entity_id = getattr(entity, "entity_id", "")
-        include, per_entity = _includes(ctx.config, entity_id)
-        if not include:
-            continue
         caps = device_mod.derive_capabilities(entity)
         appliance_types = (_appliance_type(entity, device_class),)
         mappings = _control_mappings(entity, caps, appliance_types)
         if not mappings:
             continue
-        enabled = _enabled(per_entity, caps)
-        mappings = [m for m in mappings if m.key in enabled]
-        if not mappings:
-            continue
+        # Capability narrowing is centralized in enhanced._filter_device: every
+        # control entity of an exposable device is built here with all its
+        # capabilities, and the per-device ``caps`` object is applied afterwards.
         kind = getattr(entity, "domain", "")
         devices.append(
             DuerDevice(
@@ -394,12 +331,9 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         if devices and query_entities:
             first = devices[0]
             added = []
-            device_enabled = _device_enabled(ctx.config)
             for capability, entity_id in query_entities.items():
                 state = ctx.find_state(entity_id)
                 if state is None:
-                    continue
-                if device_enabled is not None and capability not in device_enabled:
                     continue
                 added.append(_sensor_mapping(entity_id, capability, state, first.appliance_types))
             if added:

@@ -317,12 +317,56 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
     ]
 
 
+# Shared semantic-role vocabulary: one source of truth for each role's display
+# label (取暖 / 吹风 …) and the HA domains its binding may target. Profiles only
+# *declare which* roles a shape uses; adding a new shape reuses entries here
+# instead of re-typing label/domains per profile.
+ROLE_META: dict[str, dict[str, Any]] = {
+    "heating": {"label": "取暖", "domains": ("switch",)},
+    "blow": {"label": "吹风", "domains": ("switch",)},
+    "ventilation": {"label": "换气", "domains": ("switch",)},
+    "warmth_level": {"label": "暖风档位", "domains": ("select", "fan")},
+    "fan_speed": {"label": "风速档位", "domains": ("select", "fan")},
+    "target_temperature": {"label": "设定温度", "domains": ("climate", "number")},
+    "robot": {"label": "扫地机主体", "domains": ("vacuum",)},
+    "battery": {"label": "电量", "domains": ("sensor",)},
+    "cover": {"label": "晾衣杆主体", "domains": ("cover",)},
+    "dry": {"label": "烘干", "domains": ("switch", "select")},
+    "uv": {"label": "杀菌", "domains": ("switch", "select")},
+    "power": {"label": "电源", "domains": ("switch",)},
+    "wash_mode": {"label": "洗涤模式", "domains": ("select",)},
+    "water_level": {"label": "水位", "domains": ("select",)},
+    "run_state": {"label": "运行状态", "domains": ("sensor", "select")},
+    "time_left": {"label": "剩余时间", "domains": ("sensor",)},
+}
+
+
+def _resolve_roles(
+    names: tuple[str, ...], *, overrides: dict[str, tuple[str, ...]] | None = None
+) -> tuple[dict[str, str], dict[str, tuple[str, ...]]]:
+    """Resolve a profile's ``roles`` / ``role_domains`` from the shared table.
+
+    ``names`` are the roles this device shape uses; per-profile domain
+    ``overrides`` (rare) win over the table defaults.
+    """
+    domains = overrides or {}
+    return (
+        {name: ROLE_META[name]["label"] for name in names},
+        {name: domains.get(name, ROLE_META[name]["domains"]) for name in names},
+    )
+
+
+_YUBA_ROLES, _YUBA_ROLE_DOMAINS = _resolve_roles(
+    ("heating", "blow", "ventilation", "warmth_level", "fan_speed", "target_temperature")
+)
 YUBA_PROFILE = DuerDeviceProfile(
     key="YUBA",
     appliance_types=("YUBA",),
     default_capabilities=("power", "mode", "warmthLevel", "fanSpeed", "targetTemperature"),
     build=build_yuba,
     matches=_matches_yuba,
+    roles=_YUBA_ROLES,
+    role_domains=_YUBA_ROLE_DOMAINS,
 )
 
 
@@ -389,12 +433,15 @@ def build_sweeping_robot(ctx: DeviceBuildContext) -> list[DuerDevice]:
     ]
 
 
+_SWEEP_ROLES, _SWEEP_ROLE_DOMAINS = _resolve_roles(("robot", "battery"))
 SWEEPING_ROBOT_PROFILE = DuerDeviceProfile(
     key="SWEEPING_ROBOT",
     appliance_types=(APPLIANCE_SWEEPING_ROBOT,),
     default_capabilities=("power", "pause", "suction", "electricityCapacity"),
     build=build_sweeping_robot,
     matches=_matches_sweeping_robot,
+    roles=_SWEEP_ROLES,
+    role_domains=_SWEEP_ROLE_DOMAINS,
 )
 
 
@@ -419,9 +466,19 @@ def build_clothes_rack(ctx: DeviceBuildContext) -> list[DuerDevice]:
         percentage_mapping(entity_id=cover, appliance_types=appliance_types),
         pause_mapping(entity_id=cover, appliance_types=appliance_types, domain="cover", include_continue=False),
     ]
+    # mode: N switches synthesise the active drying / disinfecting function.
+    # DuerOS CLOTHES_RACK mode codes are *English* — DRYING(烘干) / AIR_DRY
+    # (风干) / DISINFECT(消毒) (confirmed from control-message.md's device-type
+    # mode table) — so mode values / legalValue use codes, not Chinese labels
+    # (mirrors the YUBA HEAT/FAN/VENTILATION handling above). Only modes whose
+    # switch is actually present are advertised: no dry -> no DRYING legalValue,
+    # no uv -> no DISINFECT; AIR_DRY is never emitted.
     mode_elems = [
-        (label, role, eid)
-        for label, role, eid in (("烘干", "dry", dry), ("杀菌", "uv", uv))
+        (code, role, eid)
+        for code, role, eid in (
+            ("DRYING", "dry", dry),
+            ("DISINFECT", "uv", uv),
+        )
         if eid
     ]
     if mode_elems:
@@ -446,12 +503,15 @@ def build_clothes_rack(ctx: DeviceBuildContext) -> list[DuerDevice]:
     ]
 
 
+_RACK_ROLES, _RACK_ROLE_DOMAINS = _resolve_roles(("cover", "dry", "uv"))
 CLOTHES_RACK_PROFILE = DuerDeviceProfile(
     key="CLOTHES_RACK",
     appliance_types=(APPLIANCE_CLOTHES_RACK,),
     default_capabilities=("power", "percentage", "pause", "mode"),
     build=build_clothes_rack,
     matches=_matches_clothes_rack,
+    roles=_RACK_ROLES,
+    role_domains=_RACK_ROLE_DOMAINS,
 )
 
 
@@ -541,12 +601,17 @@ def build_washing_machine(ctx: DeviceBuildContext) -> list[DuerDevice]:
     ]
 
 
+_WASH_ROLES, _WASH_ROLE_DOMAINS = _resolve_roles(
+    ("power", "wash_mode", "water_level", "target_temperature", "run_state", "time_left")
+)
 WASHING_MACHINE_PROFILE = DuerDeviceProfile(
     key="WASHING_MACHINE",
     appliance_types=(APPLIANCE_WASHING_MACHINE,),
     default_capabilities=("power", "mode", "waterLevel", "targetTemperature", "workState", "timeLeft"),
     build=build_washing_machine,
     matches=_matches_washing_machine,
+    roles=_WASH_ROLES,
+    role_domains=_WASH_ROLE_DOMAINS,
 )
 
 

@@ -115,3 +115,59 @@ async def test_options_flow_hub_menu(hass) -> None:
 
     # ``async_abort`` is a synchronous callback on the options flow manager.
     hass.config_entries.options.async_abort(result["flow_id"])
+
+
+async def test_options_simple_flow_saves_object_schema(hass) -> None:
+    """Simple device → capability editing persists the per-device object schema.
+
+    Each selected device is stored as an object (``{"caps": [...]}``), not a
+    bare list, so later advanced overrides (mode / bindings / hidden / names)
+    can be merged in without a schema break.
+    """
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.xiaodu_bridge.const import CONF_DEVICES, CONF_SYNC_AREAS
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={CONF_DEVICES: {}, CONF_SYNC_AREAS: False},
+    )
+    entry.add_to_hass(hass)
+
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "living_lamp")},
+        name="客厅灯",
+    )
+    er.async_get(hass).async_get_or_create(
+        "switch", "living_lamp", "unique_living_lamp", device_id=device.id
+    )
+    hass.states.async_set("switch.living_lamp", "off")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.MENU
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_DEVICES: [device.id], CONF_SYNC_AREAS: False},
+    )
+    assert result["type"] == FlowResultType.MENU
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "save"}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    devices_cfg = entry.options[CONF_DEVICES]
+    assert list(devices_cfg) == [device.id]
+    assert isinstance(devices_cfg[device.id], dict)
+    assert set(devices_cfg[device.id]) == {"caps"}
+    # A power-only switch selected with every capability checked normalizes to
+    # default-all (``caps: []``, dynamic) instead of a pinned explicit list.
+    assert devices_cfg[device.id]["caps"] == []

@@ -52,7 +52,7 @@ def load_dueros() -> tuple:
     pkg.__path__ = [str(_XIAODU / "dueros")]
     sys.modules["xiaodu.dueros"] = pkg
 
-    for mod in ("constants", "model", "composers", "registry", "profiles", "defaults", "enhanced"):
+    for mod in ("constants", "model", "device_config", "composers", "registry", "profiles", "defaults", "enhanced"):
         _load_module(f"xiaodu.dueros.{mod}", _XIAODU / "dueros" / f"{mod}.py")
     protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
 
@@ -74,6 +74,7 @@ def load_semantic_model() -> types.ModuleType:
 
     _load_module("xiaodu.dueros.constants", _XIAODU / "dueros" / "constants.py")
     _load_module("xiaodu.dueros.model", _XIAODU / "dueros" / "model.py")
+    _load_module("xiaodu.dueros.device_config", _XIAODU / "dueros" / "device_config.py")
     _load_module("xiaodu.dueros.composers", _XIAODU / "dueros" / "composers.py")
     _load_module("xiaodu.dueros.registry", _XIAODU / "dueros" / "registry.py")
     _load_module("xiaodu.dueros.profiles", _XIAODU / "dueros" / "profiles.py")
@@ -88,7 +89,7 @@ def load_enhanced() -> tuple:
     pkg = types.ModuleType("xiaodu.dueros")
     pkg.__path__ = [str(_XIAODU / "dueros")]
     sys.modules["xiaodu.dueros"] = pkg
-    for mod in ("constants", "model", "composers", "registry", "profiles", "defaults", "enhanced"):
+    for mod in ("constants", "model", "device_config", "composers", "registry", "profiles", "defaults", "enhanced"):
         _load_module(f"xiaodu.dueros.{mod}", _XIAODU / "dueros" / f"{mod}.py")
     protocol = _load_module("xiaodu.dueros.protocol", _XIAODU / "dueros" / "protocol.py")
     return protocol, sys.modules["xiaodu.dueros.enhanced"]
