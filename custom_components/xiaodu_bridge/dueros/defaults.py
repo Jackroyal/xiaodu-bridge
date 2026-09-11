@@ -302,10 +302,19 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         # control entity of an exposable device is built here with all its
         # capabilities, and the per-device ``caps`` object is applied afterwards.
         kind = getattr(entity, "domain", "")
+        friendly = (getattr(entity, "attributes", None) or {}).get("friendly_name")
+        # A single control entity keeps the device-registry name (e.g. 床头灯);
+        # several control entities (e.g. a two-gang switch 筒灯/餐厅灯) surface
+        # each under its own entity name instead of one shared device name.
+        name = (
+            ctx.device_name
+            if len(control_entities) == 1
+            else (friendly or ctx.device_name)
+        )
         devices.append(
             DuerDevice(
                 device_id=_entity_appliance_id(ctx, kind, entity_id),
-                friendly_name=ctx.device_name,
+                friendly_name=name,
                 profile_key=kind,
                 primary_entity_id=entity_id,
                 capabilities=tuple(mappings),
