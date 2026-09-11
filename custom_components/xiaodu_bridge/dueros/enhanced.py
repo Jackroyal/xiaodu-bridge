@@ -638,11 +638,13 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
     are the union of every capability the device's appliances expose, so the
     UI can let the user pick a "设备 → 能力" set.
     """
+    from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
     from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
 
     ent_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
+    area_reg = ar.async_get(hass)
 
     def device_of(entity_id: str) -> str | None:
         row = ent_reg.async_get(entity_id)
@@ -655,6 +657,13 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
     def name_of(device_key: str) -> str | None:
         device = device_reg.async_get(device_key)
         return (device.name_by_user or device.name) if device else None
+
+    def area_of(device_key: str) -> str | None:
+        device = device_reg.async_get(device_key)
+        if not device or not device.area_id:
+            return None
+        area = area_reg.async_get_area(device.area_id)
+        return area.name if area else None
 
     enhanced = build_enhanced_device_set(
         list(hass.states.async_all()),
@@ -672,10 +681,14 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
     for key in sorted(grouped):
         devs = grouped[key]
         caps = sorted({c.key for d in devs for c in d.capabilities})
+        name = name_of(key) or devs[0].friendly_name
+        # Prefix the HA room so same-named devices across rooms (e.g. several
+        # Mi Home entities all named 灯) stay distinguishable in the picker.
+        area = area_of(key)
         out.append(
             {
                 "device_key": key,
-                "name": name_of(key) or devs[0].friendly_name,
+                "name": f"{area} · {name}" if area else name,
                 "capabilities": caps,
                 "appliances": len(devs),
             }
