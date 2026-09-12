@@ -3,7 +3,7 @@
 from tests._dueros_loader import load_semantic_model
 
 load_semantic_model()
-from xiaodu.dueros.defaults import build_default_devices
+from xiaodu.dueros.defaults import _clean_entity_name, _dedup_tokens, _strip_device_prefix, build_default_devices
 from xiaodu.dueros.model import DeviceBuildContext, make_device_id
 
 
@@ -30,6 +30,49 @@ def _ctx(states, ha_device_id="dev", config=None, name="设备", stable_of=None)
         config=config,
         stable_id_of=stable_id_of,
     )
+
+
+def test_clean_entity_name_strips_device_prefix_and_key():
+    assert _clean_entity_name("灯  筒灯 左键", "灯") == "筒灯"
+    assert _clean_entity_name("灯  餐厅灯 右键", "灯") == "餐厅灯"
+
+
+def test_clean_entity_name_strips_type_suffix():
+    assert _clean_entity_name("厨房  吸顶灯 开关", "厨房") == "吸顶灯"
+
+
+def test_clean_entity_name_keeps_prefix_when_result_is_generic():
+    assert _clean_entity_name("厨房  灯 开关", "厨房") == "厨房 灯"
+
+
+def test_clean_entity_name_keeps_device_when_it_contains_sub():
+    assert _clean_entity_name("左窗帘  窗帘", "左窗帘") == "左窗帘"
+    assert _clean_entity_name("窗帘  窗帘", "窗帘") == "窗帘"
+
+
+def test_clean_entity_name_leaves_plain_names_untouched():
+    # No device-prefix and no noise suffix: return the name as-is.
+    assert _clean_entity_name("床头灯", "床头灯") == "床头灯"
+    # A key at the front with a hyphen is not a trailing suffix; only the
+    # trailing "开关" type suffix is stripped.
+    assert _clean_entity_name("厨房  左键-厨房 开关", "厨房") == "左键-厨房"
+
+
+def test_clean_entity_name_none():
+    assert _clean_entity_name(None, "设备") == ""
+
+
+def test_strip_device_prefix():
+    assert _strip_device_prefix("窗帘  窗帘", "窗帘") == "窗帘"
+    assert _strip_device_prefix("床头灯", "床头灯") == "床头灯"
+    assert _strip_device_prefix(None, "设备") == ""
+
+
+def test_dedup_tokens():
+    assert _dedup_tokens("移动侦测 移动侦测") == "移动侦测"
+    assert _dedup_tokens("窗帘 唤醒模式") == "窗帘 唤醒模式"
+    assert _dedup_tokens("灯 灯光") == "灯光"
+    assert _dedup_tokens("温控器(冷冻)") == "温控器(冷冻)"
 
 
 def test_light_builds_light_appliance_with_caps():
