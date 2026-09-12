@@ -254,6 +254,76 @@ def _control_mappings(
     return out
 
 
+_AQARA_NOISE_SUFFIXES = (
+    # Key/button position (multi-gang switches, wireless buttons)
+    "左键",
+    "右键",
+    "中键",
+    "旋钮",
+    "单击",
+    "双击",
+    "三击",
+    "长按",
+    # Entity type
+    "开关",
+)
+
+# Sub-entity names too generic to stand alone as a speaker-facing name; when
+# stripping would leave one of these, keep the device name as a prefix.
+_GENERIC_NAMES = frozenset({"灯", "开关"})
+
+
+def _strip_device_prefix(friendly: str | None, device_name: str) -> str:
+    """Strip the Aqara ``"{device}  "`` prefix from an entity name."""
+    name = str(friendly or "")
+    if device_name and name.startswith(f"{device_name}  "):
+        return name[len(device_name) + 2 :]
+    return name
+
+
+def _dedup_tokens(name: str) -> str:
+    """Drop a space-separated token fully contained in another token.
+
+    ``移动侦测 移动侦测`` -> ``移动侦测``; ``灯 灯光`` -> ``灯光``. Tokens with
+    no containment relation (``窗帘 唤醒模式``) are left untouched.
+    """
+    tokens = name.split()
+    if len(tokens) <= 1:
+        return name
+    kept: list[str] = []
+    for token in tokens:
+        if any(token in k for k in kept):
+            continue
+        kept = [k for k in kept if k not in token]
+        kept.append(token)
+    return " ".join(kept)
+
+
+def _clean_entity_name(friendly: str | None, device_name: str) -> str:
+    """Strip Aqara-style noise from an entity name for a speaker-facing name.
+
+    Aqara/Xiaomi entities are named ``"{device}  {sub} {key|type}"``
+    (e.g. ``灯  筒灯 左键``, ``厨房  吸顶灯 开关``). The ``{device}  `` prefix
+    duplicates the HA device name and the trailing ``{key|type}``
+    (左键/右键/开关…) is button/type noise, so both are stripped to leave the
+    sub-entity name (``筒灯`` / ``吸顶灯``). A sub-name fully contained in the
+    device name keeps the device name (``左窗帘`` beats ``窗帘``). If the result
+    is a generic token (``灯``/``开关``), the device name is kept as a prefix so
+    the result stays distinguishable across rooms (``厨房 灯``).
+    """
+    name = _strip_device_prefix(friendly, device_name)
+    for suffix in _AQARA_NOISE_SUFFIXES:
+        if name.endswith(f" {suffix}"):
+            name = name[: -len(suffix) - 1]
+            break
+    name = _dedup_tokens(name)
+    if device_name and name and name in device_name:
+        name = device_name
+    if name in _GENERIC_NAMES and device_name:
+        return f"{device_name} {name}"
+    return name
+
+
 def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
     """Build one or more DuerDevices for a device with no matching profile."""
     states = list(ctx.states or [])
@@ -305,12 +375,15 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         friendly = (getattr(entity, "attributes", None) or {}).get("friendly_name")
         # A single control entity keeps the device-registry name (e.g. 床头灯);
         # several control entities (e.g. a two-gang switch 筒灯/餐厅灯) surface
-        # each under its own entity name instead of one shared device name.
-        name = (
-            ctx.device_name
-            if len(control_entities) == 1
-            else (friendly or ctx.device_name)
-        )
+        # each under its own entity name instead of one shared device name. The
+        # shared _clean_entity_name handles every multi-entity domain: it strips
+        # the Aqara "{device}  " prefix + key/type suffix, keeps the device name
+        # when it fully contains the sub-name (左窗帘 > 窗帘), and guards against
+        # a bare generic token.
+        if len(control_entities) == 1:
+            name = ctx.device_name
+        else:
+            name = _clean_entity_name(friendly, ctx.device_name) or ctx.device_name
         devices.append(
             DuerDevice(
                 device_id=_entity_appliance_id(ctx, kind, entity_id),
