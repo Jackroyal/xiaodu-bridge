@@ -116,20 +116,173 @@ _SUBTITLE_MFA = "请输入第二步验证信息。"
 
 _PAGE = """<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>小度授权</title></head>
-<body style="font-family:system-ui,sans-serif;max-width:380px;margin:80px auto">
-<h2>小度授权</h2>
-<p>授权小度访问 <strong>__ENTITY_SUMMARY__</strong>（可在集成选项中调整包含/排除范围）。</p>
-<p>__SUBTITLE__</p>
-<form method="post" action="__ACTION__">
-<input type="hidden" name="response_type" value="code">
-<input type="hidden" name="client_id" value="__CLIENT_ID__">
-<input type="hidden" name="redirect_uri" value="__REDIRECT_URI__">
-<input type="hidden" name="state" value="__STATE__">
-__FIELDS__
-__ERROR__
-<p><button type="submit" style="padding:8px 24px">__SUBMIT__</button></p>
-</form>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>小度授权</title>
+<style>
+:root {
+  --bg: #f0f2f5;
+  --card: #ffffff;
+  --text: #1f2329;
+  --muted: #6b7280;
+  --border: #d9dee5;
+  --primary: #1668dc;
+  --primary-hover: #0f5bc0;
+  --primary-ring: rgba(22, 104, 220, 0.18);
+  --danger: #d4380d;
+  --danger-bg: #fff1f0;
+  --danger-border: #ffccc7;
+  --input-bg: #ffffff;
+  --summary-bg: #f6f8fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131414;
+    --card: #1f2021;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #3c4043;
+    --primary: #4c8bf5;
+    --primary-hover: #6ba1f7;
+    --primary-ring: rgba(76, 139, 245, 0.25);
+    --danger: #ff7875;
+    --danger-bg: #2a1215;
+    --danger-border: #5c1a1a;
+    --input-bg: #2a2b2c;
+    --summary-bg: #262728;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  -webkit-font-smoothing: antialiased;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  padding: 36px 32px;
+  width: 100%;
+  max-width: 400px;
+}
+.brand {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+.summary {
+  background: var(--summary-bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+.summary strong { color: var(--text); font-weight: 600; }
+.summary-hint { margin-top: 6px; font-size: 12px; }
+.subtitle {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 8px 0 20px;
+}
+.field { display: block; margin-bottom: 16px; }
+.field-label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.field-check input { width: 16px; height: 16px; accent-color: var(--primary); }
+.error {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.submit {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: background .15s;
+}
+.submit:hover { background: var(--primary-hover); }
+.submit:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">
+    <img class="logo" src="data:image/png;base64,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" alt="" aria-hidden="true">
+    小度授权
+  </div>
+  <div class="summary">
+    <div>授权小度访问以下设备：</div>
+    <strong>__ENTITY_SUMMARY__</strong>
+    <div class="summary-hint">可在集成选项中调整包含 / 排除范围</div>
+  </div>
+  <p class="subtitle">__SUBTITLE__</p>
+  <form method="post" action="__ACTION__" novalidate>
+    <input type="hidden" name="response_type" value="code">
+    <input type="hidden" name="client_id" value="__CLIENT_ID__">
+    <input type="hidden" name="redirect_uri" value="__REDIRECT_URI__">
+    <input type="hidden" name="state" value="__STATE__">
+    __FIELDS__
+    __ERROR__
+    <button type="submit" class="submit">__SUBMIT__</button>
+  </form>
+</main>
 </body>
 </html>
 """
@@ -293,8 +446,9 @@ def _render_field(field: dict[str, Any]) -> str:
     if ftype == "boolean":
         checked = " checked" if default else ""
         return (
-            f'<p><label><input type="checkbox" name="{_esc(name)}"{checked}> '
-            f"{_esc(label)}</label></p>"
+            f'<label class="field field-check">'
+            f'<input type="checkbox" name="{_esc(name)}"{checked}> '
+            f'<span>{_esc(label)}</span></label>'
         )
     input_type = (
         "password"
@@ -302,10 +456,13 @@ def _render_field(field: dict[str, Any]) -> str:
         else ("number" if ftype == "integer" else "text")
     )
     value = _esc(default) if default not in (None, "") else ""
+    autofocus = " autofocus" if name == "username" else ""
     return (
-        f'<p><label>{_esc(label)}<br>'
-        f'<input name="{_esc(name)}" type="{input_type}" value="{value}" '
-        f'style="width:100%"></label></p>'
+        f'<label class="field">'
+        f'<span class="field-label">{_esc(label)}</span>'
+        f'<input class="input" name="{_esc(name)}" type="{input_type}" '
+        f'value="{value}"{autofocus}>'
+        f'</label>'
     )
 
 
@@ -542,7 +699,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
             .replace("__SUBMIT__", _esc(submit))
             .replace(
                 "__ERROR__",
-                f'<p style="color:#c62828">{_esc(error)}</p>' if error else "",
+                f'<div class="error">{_esc(error)}</div>' if error else "",
             )
         )
         headers = {}
