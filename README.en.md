@@ -278,12 +278,6 @@ After adding the integration, open the integration entry and select **设备与�
 │   └── translations/
 ├── hacs.json
 ├── pyproject.toml
-├── reference/dueros/            # Xiaodu official protocol archive + contract lookup (dev reference)
-│   ├── dbp-smart-home-protocol/ # official protocol source (auto-fetched, do not edit)
-│   ├── contracts/               # message → payload contract lookup (auto-generated)
-│   ├── lookup.py                # protocol lookup: contract-first, fallback to source slices
-│   ├── verify_conversion.py     # fetch source and self-check conversion fidelity
-│   └── README.md
 └── tests/
 ```
 
@@ -298,15 +292,21 @@ pytest
 
 ### Protocol reference (read before changing the DuerOS protocol)
 
-The repository locally archives the official Xiaodu "smart home protocol" full text plus
-auto-generated contract lookups (see `reference/dueros/README.md`). Before changing any
-DuerOS message/field/capability in `xiaodu_bridge`, locate it with the contract-first
-lookup instead of reading large files wholesale:
+Before changing any DuerOS message / field / capability in `xiaodu_bridge`, **check the
+official Xiaodu smart-home protocol payload contract first** — never infer payload keys
+from attribute names or intuition (once the attribute name was used as a payload key,
+which made every voice command fall back to "unsupported").
+
+That protocol documentation is official Xiaodu material and is **not distributed with this
+repository**. Obtain it from the official documentation site, or use a local two-level
+lookup tool (contract lookup first, falling back to source slices):
 
 ```bash
-python3 reference/dueros/lookup.py SetTemperature   # contract lookup + source pointer
-python3 reference/dueros/lookup.py 空调 --grep       # fall back to source slices when not covered by contracts
+python3 <protocol-archive>/lookup.py SetTemperature   # contract lookup + source pointer
+python3 <protocol-archive>/lookup.py 空调 --grep       # fall back to source slices when not covered by contracts
 ```
+
+See the `README.md` inside the archive directory for the full workflow.
 
 The repository enables the following GitHub Actions:
 

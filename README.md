@@ -243,12 +243,6 @@ Home Assistant :8123
 │   └── translations/
 ├── hacs.json
 ├── pyproject.toml
-├── reference/dueros/            # 小度官方协议归档 + 契约速查/检索（开发参考）
-│   ├── dbp-smart-home-protocol/ # 官方协议原文（自动抓取，勿手改）
-│   ├── contracts/               # 消息 → Payload 契约速查（自动生成）
-│   ├── lookup.py                # 协议检索：契约优先，未命中回退原文切片
-│   ├── verify_conversion.py     # 抓原文自检转换保真度
-│   └── README.md
 └── tests/
 ```
 
@@ -263,13 +257,19 @@ pytest
 
 ### 协议参考（改动 DuerOS 协议前先读）
 
-本地归档了小度官方「智能家居协议」全文与自动生成的契约速查（见 `reference/dueros/README.md`）。
-改动 `xiaodu_bridge` 中任何 DuerOS 消息/字段/能力前，先用契约优先的检索定位，不要整篇读大文件：
+改动 `xiaodu_bridge` 中任何 DuerOS 消息 / 字段 / 能力前，**先查小度官方「智能家居协议」的
+Payload 契约再动代码**——不要凭属性名或直觉推断载荷键（历史上有过把属性名当载荷键用，
+导致语音指令一律回落「不支持」的教训）。
+
+该协议文档为小度官方资料，**不随本仓库分发**。开发者需自行从官方文档站获取，或使用本地的
+两级检索工具（契约速查优先，未命中再回退原文切片）：
 
 ```bash
-python3 reference/dueros/lookup.py SetTemperature   # 契约速查 + 原文指针
-python3 reference/dueros/lookup.py 空调 --grep       # 契约未覆盖时回退原文切片
+python3 <协议归档>/lookup.py SetTemperature   # 契约速查 + 原文指针
+python3 <协议归档>/lookup.py 空调 --grep       # 契约未覆盖时回退原文切片
 ```
+
+用法与两级工作流见归档目录内的 `README.md`。
 
 仓库启用以下 GitHub Actions：
 
