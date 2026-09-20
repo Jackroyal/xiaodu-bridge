@@ -114,6 +114,22 @@ def _payload_temperature(payload: dict[str, Any]) -> tuple[float | None, str]:
     return None, ""
 
 
+def _payload_delta_temperature(payload: dict[str, Any]) -> tuple[float | None, str]:
+    """Extract (delta, scale) from an Increment/DecrementTemperature payload.
+
+    The contract carries the step under ``deltaValue`` — the ``deltaTemperature``
+    / ``temperature`` keys this used to look for do not exist in the protocol.
+    """
+    node = payload.get("deltaValue")
+    if not isinstance(node, dict):
+        value = _num(node)
+        return (value, "") if value is not None else (None, "")
+    value = _num(node.get("value"))
+    if value is None:
+        return None, ""
+    return value, str(node.get("scale") or "")
+
+
 def _temperature_target_unit(hass: Any) -> str:
     """The temperature unit Home Assistant is configured to display.
 
@@ -140,6 +156,24 @@ def _convert_temperature(value: float, from_unit: str, to_unit: str) -> float:
         return round((value - 32) * 5 / 9, 1)
     if "c" in f and "f" in t:
         return round(value * 9 / 5 + 32, 1)
+    return value
+
+
+def _convert_temperature_delta(value: float, from_unit: str, to_unit: str) -> float:
+    """Convert a temperature *difference* between °C and °F.
+
+    A delta has no zero-point offset, so this scales only — using
+    :func:`_convert_temperature` on an increment would subtract 32 first and
+    produce a nonsensical step.
+    """
+    f = (from_unit or "").lower()
+    t = (to_unit or "").lower()
+    if not f or not t or f == t:
+        return value
+    if "f" in f and "c" in t:
+        return round(value * 5 / 9, 2)
+    if "c" in f and "f" in t:
+        return round(value * 9 / 5, 2)
     return value
 
 
@@ -293,12 +327,18 @@ def select_mapping(
     select_domain: str = "select",
     set_action: str = "",
     unset_action: str = "",
+    ordered_options: bool = False,
 ) -> CapabilityMapping:
     """A ``select`` entity (mode / gear / fan-speed / water-level) mapping.
 
     Reads the current ``option``; writes via ``select.select_option``. The
     ``set_action`` / ``unset_action`` names tell the protocol which DuerOS
     actions this capability accepts (e.g. setGear for warmthLevel).
+
+    ``ordered_options`` marks a capability whose options are an ordered speed
+    scale (fan speed): DuerOS then names a *position* (``fanSpeed.value`` 1..10
+    or a ``fanSpeed.level`` word) that is resolved against the option order,
+    instead of the payload value being used verbatim as an option label.
     """
     actions = tuple(
         DuerAction(name, capability_key, capability_key)
@@ -322,6 +362,11 @@ def select_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name not in (set_action, unset_action):
             return None
+        if ordered_options:
+            option = _select_level_option(ctx, capability_key)
+            if option is None:
+                return None
+            return [ServiceCall(select_domain, "select_option", {"option": option}, entity_id)]
         value = _payload_value(ctx.payload, capability_key)
         if value is None:
             value = _payload_value(ctx.payload, "mode")
@@ -363,9 +408,15 @@ def target_temperature_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_TEMPERATURE:
             return None
-        value = _num(_payload_value(ctx.payload, "temperature"))
+        # Accept both payload keys: the contract's ``targetTemperature`` and the
+        # ``temperature`` some clients use, so a captured payload never falls
+        # through to NotSupportedInCurrentModeError.
+        value, scale = _payload_temperature(ctx.payload)
         if value is None:
             return None
+        target = _temperature_target_unit(ctx.hass)
+        if scale and target and scale.lower() != target.lower():
+            value = _convert_temperature(value, scale, target)
         return [ServiceCall(domain, set_service, {"value": value}, entity_id)]
 
     return CapabilityMapping(
@@ -645,7 +696,7 @@ def color_temperature_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_COLOR_TEMPERATURE:
             return None
-        value = _payload_value(ctx.payload, "colorTemperature")
+        value = _payload_value(ctx.payload, "colorTemperatureInKelvin")
         if value is None:
             return None
         state = ctx.entities.get("value")
@@ -714,10 +765,12 @@ def volume_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_VOLUME:
             return None
-        value = _payload_value(ctx.payload, "volume")
+        # The contract carries the target volume under ``deltaValue`` despite
+        # the name (``SetVolumeRequest``: "音量范围0-100").
+        value = _num(_payload_value(ctx.payload, "deltaValue"))
         if value is None:
             return None
-        level = max(0.0, min(100.0, float(value))) / 100
+        level = max(0.0, min(100.0, value)) / 100
         return [ServiceCall("media_player", "volume_set", {"volume_level": level}, entity_id)]
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
@@ -746,10 +799,19 @@ def mute_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_VOLUME_MUTE:
             return None
-        mute = ctx.payload.get("mute", ctx.payload.get("muteState"))
-        if not isinstance(mute, bool):
+        # The contract sends the mute state as the enum "on" / "off" under
+        # ``deltaValue.value`` (not a boolean, and not a ``mute`` key).
+        mute = _payload_value(ctx.payload, "deltaValue")
+        if not isinstance(mute, str):
             return None
-        return [ServiceCall("media_player", "volume_mute", {"is_volume_muted": mute}, entity_id)]
+        token = mute.strip().lower()
+        if token not in ("on", "off"):
+            return None
+        return [
+            ServiceCall(
+                "media_player", "volume_mute", {"is_volume_muted": token == "on"}, entity_id
+            )
+        ]
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
@@ -777,7 +839,10 @@ def channel_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_TV_CHANNEL:
             return None
-        channel = (ctx.payload.get("channel") or {}).get("value")
+        # The contract carries the channel under ``deltaValue.value`` (int for a
+        # numeric channel, string for a channel name) — there is no ``channel``
+        # payload key.
+        channel = _payload_value(ctx.payload, "deltaValue")
         if channel is None:
             return None
         return [ServiceCall("media_player", "select_source", {"source": str(channel)}, entity_id)]
@@ -826,6 +891,37 @@ def _fan_scale_to_step(value: float, count: int) -> int:
     if count <= 1:
         return 0
     return round((min(10.0, max(1.0, value)) - 1) / 9 * (count - 1))
+
+
+def _fan_level_step(level: str, count: int) -> int | None:
+    """A DuerOS level word as an index into ``count`` ordered speed steps."""
+    scale = _fan_level_scale(level)
+    return None if scale is None else _fan_scale_to_step(scale, count)
+
+
+def _select_level_option(ctx: WriteContext, payload_key: str) -> str | None:
+    """Resolve a DuerOS fan-speed payload to one of a select's own options.
+
+    ``fanSpeed.value`` (1..10) and ``fanSpeed.level`` name a *position* on the
+    entity's option order (slowest → fastest); the option labels come from the
+    integration (e.g. 低档 / 高档), so the raw DuerOS token is never itself a
+    valid option.
+    """
+    state = ctx.entities.get("value")
+    options = [
+        str(option) for option in ((state.attributes.get("options") or ()) if state is not None else ())
+    ]
+    if not options:
+        return None
+    level = _fan_speed_level(ctx.payload)
+    if _is_auto_fan_mode(level):
+        return None
+    value = _num(_payload_value(ctx.payload, payload_key))
+    if value is None:
+        value = _fan_level_scale(level)
+    if value is None:
+        return None
+    return options[_fan_scale_to_step(value, len(options))]
 
 
 def fan_speed_mapping(
@@ -981,7 +1077,7 @@ def climate_fan_speed_mapping(
             current = _climate_fan_index(state, steps)
             if current is None:
                 return None
-            delta = _payload_number(ctx.payload, "deltaFanSpeed", "fanSpeed")
+            delta = _payload_number(ctx.payload, "deltaValue")
             delta = 1 if delta is None else round(delta)
             step = delta if action == ACTION_INCREMENT_FAN_SPEED else -delta
             index = max(0, min(len(steps) - 1, current + step))
@@ -1089,9 +1185,13 @@ def climate_temperature_mapping(
             if current is None:
                 return None
             step = _num(state.attributes.get("target_temp_step")) if state is not None else None
-            delta = _payload_number(ctx.payload, "deltaTemperature", "temperature")
+            delta, scale = _payload_delta_temperature(ctx.payload)
             if delta is None:
                 delta = step or 1.0
+            else:
+                target = _temperature_target_unit(ctx.hass)
+                if scale and target and scale.lower() != target.lower():
+                    delta = _convert_temperature_delta(delta, scale, target)
             value = current + delta if action == ACTION_INCREMENT_TEMPERATURE else current - delta
             if step:
                 value = round(round(value / step) * step, 2)
@@ -1130,7 +1230,9 @@ def target_humidity_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_HUMIDITY:
             return None
-        value = _num(_payload_value(ctx.payload, "humidity"))
+        # The contract carries the target humidity under ``deltaValue`` (0-100,
+        # scale %), not ``humidity``.
+        value = _num(_payload_value(ctx.payload, "deltaValue"))
         if value is None:
             return None
         return [ServiceCall(domain, "set_humidity", {"humidity": int(value)}, entity_id)]

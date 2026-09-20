@@ -284,6 +284,7 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
                 capability_key="fanSpeed",
                 appliance_types=appliance_types,
                 set_action="setFanSpeed",
+                ordered_options=True,
             )
         )
     if temp:

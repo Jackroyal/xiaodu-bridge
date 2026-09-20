@@ -24,7 +24,7 @@ def _yuba_states():
         FakeState("switch.blow", "off", {"friendly_name": "吹风"}),
         FakeState("switch.ventilation", "off", {"friendly_name": "换气"}),
         FakeState("select.warmth_level", "select", {"friendly_name": "热度档位", "option": "暖风"}),
-        FakeState("select.fan_speed", "select", {"friendly_name": "风速", "option": "强劲"}),
+        FakeState("select.fan_speed", "select", {"friendly_name": "风速", "option": "高档", "options": ["低档", "高档"]}),
         FakeState("number.target_temperature", "30", {"friendly_name": "设定温度"}),
     ]
 
@@ -102,11 +102,40 @@ def test_yuba_set_gear_and_temperature():
 
     temp = next(c for c in dev.capabilities if c.key == "targetTemperature")
     tctx = __import__("types").SimpleNamespace(
+        hass=None,
         action=DuerAction("setTemperature", "targetTemperature", "temperature"),
-        payload={"temperature": {"value": 32}}, entities={"value": ctx.find_state("number.target_temperature")})
+        payload={"targetTemperature": {"value": 32, "scale": "CELSIUS"}},
+        entities={"value": ctx.find_state("number.target_temperature")})
     tcalls = temp.write(tctx)
     assert tcalls[0].domain == "number"
     assert tcalls[0].data == {"value": 32}
+
+
+def test_yuba_set_fan_speed_maps_level_onto_option_order():
+    # DuerOS names a position ("max", or fanSpeed 1..10); the select's labels
+    # come from the integration (低档 / 高档), so the raw token is never a valid
+    # option — it has to be resolved against the entity's own option order.
+    dev = build_yuba(_ctx())[0]
+    fan = next(c for c in dev.capabilities if c.key == "fanSpeed")
+    ctx = _ctx()
+    state = ctx.find_state("select.fan_speed")
+
+    def calls(payload):
+        return fan.write(
+            __import__("types").SimpleNamespace(
+                hass=None,
+                action=DuerAction("setFanSpeed", "fanSpeed", "fanSpeed"),
+                payload=payload,
+                entities={"value": state},
+            )
+        )
+
+    assert calls({"fanSpeed": {"level": "max"}})[0].data == {"option": "高档"}
+    assert calls({"fanSpeed": {"level": "min"}})[0].data == {"option": "低档"}
+    assert calls({"fanSpeed": {"value": 10}})[0].data == {"option": "高档"}
+    assert calls({"fanSpeed": {"value": 1}})[0].data == {"option": "低档"}
+    # No automatic option on this entity.
+    assert calls({"fanSpeed": {"level": "auto"}}) is None
 
 
 def test_yuba_off_turns_all_functions_off():

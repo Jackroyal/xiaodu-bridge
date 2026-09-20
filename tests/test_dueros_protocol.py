@@ -425,7 +425,7 @@ def test_control_color_temperature_maps_to_kelvin():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": "light.ct"},
-                    "colorTemperature": {"value": 3000},
+                    "colorTemperatureInKelvin": 3000,
                 },
             ),
         )
@@ -448,7 +448,7 @@ def test_control_color_temperature_clamped_to_device_range():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": "light.ct"},
-                    "colorTemperature": {"value": 9000},
+                    "colorTemperatureInKelvin": 9000,
                 },
             ),
         )
@@ -657,7 +657,7 @@ def test_control_media_player_volume():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": "media_player.tv"},
-                    "volume": {"value": 50},
+                    "deltaValue": {"value": 50},
                 },
             ),
         )
@@ -669,6 +669,36 @@ def test_control_media_player_volume():
 
 
 def test_control_media_player_mute():
+    # The contract sends mute as the enum "on" / "off" under deltaValue.value.
+    for token, expected in {"on": True, "off": False}.items():
+        hass = FakeHass([_tv_state()])
+        devices = _device_map(hass, ["media_player.tv"], caps=["mute"])
+        result = run(
+            handle_request(
+                hass,
+                devices,
+                _request(
+                    NAMESPACE_CONTROL,
+                    "SetVolumeMuteRequest",
+                    {
+                        "accessToken": "t",
+                        "appliance": {"applianceId": "media_player.tv"},
+                        "deltaValue": {"value": token},
+                    },
+                ),
+            )
+        )
+        assert result["header"]["name"] == "SetVolumeMuteConfirmation", token
+        assert hass.service_calls == [
+            (
+                "media_player",
+                "volume_mute",
+                {"entity_id": "media_player.tv", "is_volume_muted": expected},
+            )
+        ], token
+
+
+def test_control_media_player_mute_rejects_unknown_token():
     hass = FakeHass([_tv_state()])
     devices = _device_map(hass, ["media_player.tv"], caps=["mute"])
     result = run(
@@ -681,15 +711,13 @@ def test_control_media_player_mute():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": "media_player.tv"},
-                    "mute": True,
+                    "deltaValue": {"value": "maybe"},
                 },
             ),
         )
     )
-    assert result["header"]["name"] == "SetVolumeMuteConfirmation"
-    assert hass.service_calls == [
-        ("media_player", "volume_mute", {"entity_id": "media_player.tv", "is_volume_muted": True})
-    ]
+    assert result["header"]["name"] == "NotSupportedInCurrentModeError"
+    assert hass.service_calls == []
 
 
 def test_control_media_player_channel():
@@ -705,7 +733,7 @@ def test_control_media_player_channel():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": "media_player.tv"},
-                    "channel": {"value": "HDMI2"},
+                    "deltaValue": {"value": "HDMI2"},
                 },
             ),
         )
@@ -880,6 +908,9 @@ def test_control_climate_set_temperature_accepts_target_temperature_payload():
 
 
 def test_control_climate_increment_temperature():
+    # The contract carries the step under deltaValue; it must be honoured (the
+    # old code looked for a nonexistent deltaTemperature key and fell back to
+    # the entity's own target_temp_step, so "调高两度" only moved 0.5°C).
     hass = FakeHass([_ac_state(temperature=25.0)])
     devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature"])
     aid = _device_id_of(devices, "climate.ac")
@@ -893,14 +924,41 @@ def test_control_climate_increment_temperature():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": aid},
-                    "deltaTemperature": {"value": 1},
+                    "deltaValue": {"value": 2, "scale": "CELSIUS"},
                 },
             ),
         )
     )
     assert result["header"]["name"] == "IncrementTemperatureConfirmation"
     assert hass.service_calls == [
-        ("climate", "set_temperature", {"entity_id": "climate.ac", "temperature": 26.0})
+        ("climate", "set_temperature", {"entity_id": "climate.ac", "temperature": 27.0})
+    ]
+
+
+def test_control_climate_increment_temperature_converts_fahrenheit_delta():
+    # A delta has no zero point: 9°F is 5°C, not (9-32)*5/9.
+    hass = FakeHass([_ac_state(temperature=25.0)])
+    hass.config = FakeConfig("°C")
+    devices = _device_map(hass, ["climate.ac"], caps=["targetTemperature"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "IncrementTemperatureRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "deltaValue": {"value": 9, "scale": "FAHRENHEIT"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "IncrementTemperatureConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_temperature", {"entity_id": "climate.ac", "temperature": 30.0})
     ]
 
 
@@ -943,14 +1001,14 @@ def test_control_climate_increment_fan_speed():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": aid},
-                    "deltaFanSpeed": {"value": 1},
+                    "deltaValue": {"value": 2},
                 },
             ),
         )
     )
     assert result["header"]["name"] == "IncrementFanSpeedConfirmation"
     assert hass.service_calls == [
-        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "80"})
+        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "100"})
     ]
 
 
@@ -1140,7 +1198,7 @@ def test_control_humidifier_humidity():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": "humidifier.h"},
-                    "humidity": {"value": 60},
+                    "deltaValue": {"value": 60, "scale": "%"},
                 },
             ),
         )

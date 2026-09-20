@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.10**.
+Current version: **v0.9.11**.
 
 ## Features
 
@@ -73,6 +73,14 @@ Current version: **v0.9.10**.
   automatic fan as the numeric step `102` rather than `auto`; it is no longer treated as
   the fastest step, is reachable only through the `auto` level word, and sits above the
   fastest step when stepping up or down.
+- **Control payloads parsed per the protocol contract**: volume, mute, TV channel, color
+  temperature and target humidity used to read payload keys that do not exist in the
+  protocol (`volume` / `channel` / `colorTemperature` / `humidity`), so setting them by
+  voice answered "unsupported"; they now read `deltaValue` (volume / channel / humidity),
+  `deltaValue.value` as `on`/`off` (mute) and `colorTemperatureInKelvin` (color
+  temperature). The incremental messages (temperature / fan-speed up-down) likewise use
+  the contract's `deltaValue`, and a temperature delta is converted as a difference
+  (no absolute-temperature offset) — "raise by two degrees" no longer moves one step.
 - **Climate mode reporting**: hvac mode prefers the entity state (compatible with
   integrations like Midea that don't provide an `hvac_mode` attribute), avoiding a
   cooling AC being reported as "unknown mode".
