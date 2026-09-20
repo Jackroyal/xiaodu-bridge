@@ -740,6 +740,52 @@ def test_control_fan_speed():
     ]
 
 
+def test_control_fan_speed_level_word():
+    hass = FakeHass([FakeState("fan.f1", "on", {"friendly_name": "风扇", "percentage": 30})])
+    devices = _device_map(hass, ["fan.f1"], caps=["fanSpeed"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetFanSpeedRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": "fan.f1"},
+                    "fanSpeed": {"level": "max"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "SetFanSpeedConfirmation"
+    assert hass.service_calls == [
+        ("fan", "set_percentage", {"entity_id": "fan.f1", "percentage": 100})
+    ]
+
+
+def test_control_fan_speed_auto_has_no_percentage_equivalent():
+    hass = FakeHass([FakeState("fan.f1", "on", {"friendly_name": "风扇", "percentage": 30})])
+    devices = _device_map(hass, ["fan.f1"], caps=["fanSpeed"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetFanSpeedRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": "fan.f1"},
+                    "fanSpeed": {"level": "auto"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "NotSupportedInCurrentModeError"
+    assert hass.service_calls == []
+
+
 def _ac_state(entity_id="climate.ac", state="cool", fan_mode="60", temperature=25.0):
     """A Midea-style AC climate entity (discrete fan_modes, no percentage)."""
     return FakeState(
@@ -932,7 +978,70 @@ def test_control_climate_decrement_fan_speed_clamps_at_lowest():
     ]
 
 
-def test_control_climate_set_fan_speed_maps_index_to_mode():
+def test_control_climate_set_fan_speed_spreads_scale_over_speed_steps():
+    # fanSpeed 1..10 spreads over the numbered steps only; "102" is the
+    # automatic mode, so the top of the scale is "100".
+    for value, expected in {1: "20", 3: "40", 5: "60", 7: "80", 10: "100"}.items():
+        hass = FakeHass([_ac_state(fan_mode="60")])
+        devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+        aid = _device_id_of(devices, "climate.ac")
+        result = run(
+            handle_request(
+                hass,
+                devices,
+                _request(
+                    NAMESPACE_CONTROL,
+                    "SetFanSpeedRequest",
+                    {
+                        "accessToken": "t",
+                        "appliance": {"applianceId": aid},
+                        "fanSpeed": {"value": value},
+                    },
+                ),
+            )
+        )
+        assert result["header"]["name"] == "SetFanSpeedConfirmation", value
+        assert hass.service_calls == [
+            ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": expected})
+        ], value
+
+
+def test_control_climate_set_fan_speed_level_words():
+    # A level word arrives as fanSpeed.level with no value (e.g. "把风速设为高速风").
+    for level, expected in {
+        "min": "20",
+        "low": "40",
+        "middle": "60",
+        "high": "80",
+        "max": "100",
+    }.items():
+        hass = FakeHass([_ac_state(fan_mode="60")])
+        devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+        aid = _device_id_of(devices, "climate.ac")
+        result = run(
+            handle_request(
+                hass,
+                devices,
+                _request(
+                    NAMESPACE_CONTROL,
+                    "SetFanSpeedRequest",
+                    {
+                        "accessToken": "t",
+                        "appliance": {"applianceId": aid},
+                        "fanSpeed": {"level": level, "scale": "挡"},
+                    },
+                ),
+            )
+        )
+        assert result["header"]["name"] == "SetFanSpeedConfirmation", level
+        assert hass.service_calls == [
+            ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": expected})
+        ], level
+
+
+def test_control_climate_set_fan_speed_auto():
+    # The captured "把空调风速设置成自动" payload: level only, no value. It used
+    # to fall through to NotSupportedInCurrentModeError.
     hass = FakeHass([_ac_state(fan_mode="60")])
     devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
     aid = _device_id_of(devices, "climate.ac")
@@ -946,14 +1055,75 @@ def test_control_climate_set_fan_speed_maps_index_to_mode():
                 {
                     "accessToken": "t",
                     "appliance": {"applianceId": aid},
-                    "fanSpeed": {"value": 3},
+                    "fanSpeed": {"level": "auto", "scale": "挡"},
                 },
             ),
         )
     )
     assert result["header"]["name"] == "SetFanSpeedConfirmation"
     assert hass.service_calls == [
-        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "80"})
+        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "102"})
+    ]
+
+
+def test_control_climate_set_fan_speed_auto_without_auto_mode():
+    state = _ac_state(fan_mode="60")
+    state.attributes["fan_modes"] = ["20", "40", "60", "80", "100"]
+    hass = FakeHass([state])
+    devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetFanSpeedRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "fanSpeed": {"level": "auto"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "NotSupportedInCurrentModeError"
+    assert hass.service_calls == []
+
+
+def test_discovery_climate_reports_auto_as_off_scale_fan_speed():
+    hass = FakeHass([_ac_state(fan_mode="102")])
+    devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
+        )
+    )
+    app = result["payload"]["discoveredAppliances"][0]
+    fan = next(a for a in app["attributes"] if a["name"] == "fanSpeed")
+    assert fan["value"] == 0
+
+
+def test_control_climate_decrement_fan_speed_from_auto_lands_on_fastest_step():
+    hass = FakeHass([_ac_state(fan_mode="102")])
+    devices = _device_map(hass, ["climate.ac"], caps=["fanSpeed"])
+    aid = _device_id_of(devices, "climate.ac")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "DecrementFanSpeedRequest",
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
+            ),
+        )
+    )
+    assert result["header"]["name"] == "DecrementFanSpeedConfirmation"
+    assert hass.service_calls == [
+        ("climate", "set_fan_mode", {"entity_id": "climate.ac", "fan_mode": "100"})
     ]
 
 

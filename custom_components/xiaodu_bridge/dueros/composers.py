@@ -785,6 +785,49 @@ def channel_mapping(
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
 
+# DuerOS named fan levels (``SetFanSpeedRequest.fanSpeed.level``), placed evenly
+# on the protocol's 1..10 fanSpeed scale so a level word and a concrete
+# ``fanSpeed.value`` are converted by the same code path. "auto" is not a
+# position on that scale — it selects the device's automatic fan mode instead.
+_FAN_LEVEL_POSITIONS = {"min": 0.0, "low": 0.25, "middle": 0.5, "high": 0.75, "max": 1.0}
+
+# Tokens fan_/climate integrations use for their automatic fan mode. "auto" is
+# the Home Assistant convention; "102" is Midea's encoding on its 20..100
+# wind-speed scale, surfaced as a plain numeric ``fan_mode`` rather than "auto".
+_AUTO_FAN_MODES = frozenset({"auto", "automatic", "102"})
+
+
+def _is_auto_fan_mode(mode: str) -> bool:
+    return mode.strip().lower() in _AUTO_FAN_MODES
+
+
+def _fan_speed_level(payload: dict[str, Any]) -> str:
+    """``fanSpeed.level`` when the user phrased a level word, else ``""``.
+
+    DuerOS sends ``fanSpeed`` as *either* ``{"value": 1..10}`` (a concrete
+    speed) or ``{"level": "min"|"low"|"middle"|"high"|"max"|"auto"}`` (a named
+    level), depending on how the user phrased it — never both.
+    """
+    node = payload.get("fanSpeed")
+    if not isinstance(node, dict):
+        return ""
+    level = node.get("level")
+    return str(level).strip().lower() if level is not None else ""
+
+
+def _fan_level_scale(level: str) -> float | None:
+    """A DuerOS level word as a position on the 1..10 fanSpeed scale."""
+    fraction = _FAN_LEVEL_POSITIONS.get(level)
+    return None if fraction is None else 1 + fraction * 9
+
+
+def _fan_scale_to_step(value: float, count: int) -> int:
+    """Spread a 1..10 fanSpeed value over ``count`` discrete device steps."""
+    if count <= 1:
+        return 0
+    return round((min(10.0, max(1.0, value)) - 1) / 9 * (count - 1))
+
+
 def fan_speed_mapping(
     *,
     entity_id: str,
@@ -810,33 +853,66 @@ def fan_speed_mapping(
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_FAN_SPEED:
             return None
-        value = _payload_value(ctx.payload, "fanSpeed")
+        value = _num(_payload_value(ctx.payload, "fanSpeed"))
+        if value is None:
+            # A level word ("min" .. "max"). "auto" has no percentage
+            # equivalent, so it stays unsupported for a plain fan.
+            value = _fan_level_scale(_fan_speed_level(ctx.payload))
         if value is None:
             return None
-        v = max(0, min(10, round(float(value))))
-        return [ServiceCall(domain, "set_percentage", {"percentage": v * 10}, entity_id)]
+        return [
+            ServiceCall(
+                domain,
+                "set_percentage",
+                {"percentage": max(0, min(100, round(value * 10)))},
+                entity_id,
+            )
+        ]
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
+
+
+def _climate_fan_modes(state: Any) -> list[str]:
+    modes = (state.attributes.get("fan_modes") or ()) if state is not None else ()
+    return [str(mode) for mode in modes]
+
+
+def _climate_auto_fan_mode(state: Any) -> str | None:
+    """The climate's automatic fan mode token, if it exposes one."""
+    return next((mode for mode in _climate_fan_modes(state) if _is_auto_fan_mode(mode)), None)
 
 
 def _climate_fan_levels(state: Any) -> list[str]:
     """Order a climate's ``fan_modes`` from slowest to fastest.
 
     AC integrations (Midea / xiaomi) model fan speed as discrete
-    ``fan_modes`` — percentage strings ("20".."100") plus an "auto" token.
-    Numeric modes sort by value; anything non-numeric (e.g. auto) is treated
-    as the fastest level.
+    ``fan_modes`` — percentage strings ("20".."100") plus a separate automatic
+    mode. Numeric modes sort by value; anything non-numeric is kept after them.
+    The automatic mode is not a speed step, so it is excluded here instead of
+    sorting as the fastest level; it is reached via ``fanSpeed.level == "auto"``.
     """
-    modes = list((state.attributes.get("fan_modes") or ()) if state is not None else [])
     numeric: list[str] = []
     labelled: list[str] = []
-    for mode in modes:
+    for mode in _climate_fan_modes(state):
+        if _is_auto_fan_mode(mode):
+            continue
         if _num(mode) is not None:
-            numeric.append(str(mode))
+            numeric.append(mode)
         else:
-            labelled.append(str(mode))
+            labelled.append(mode)
     numeric.sort(key=float)
     return numeric + labelled
+
+
+def _climate_fan_steps(state: Any) -> list[str]:
+    """Fan modes in DuerOS order: speed steps ascending, then ``auto``.
+
+    Increment / decrement walk this list, so ``auto`` sits above the fastest
+    numbered step and stepping down out of auto lands on that step.
+    """
+    auto = _climate_auto_fan_mode(state)
+    levels = _climate_fan_levels(state)
+    return [*levels, auto] if auto is not None else levels
 
 
 def _climate_fan_index(state: Any, levels: list[str]) -> int | None:
@@ -855,9 +931,10 @@ def climate_fan_speed_mapping(
     """AC fan speed (``setFanSpeed`` / ``incrementFanSpeed`` / ``decrementFanSpeed``).
 
     The climate domain has no ``percentage`` attribute, so DuerOS fan speed
-    (0..10) maps onto the climate's discrete ``fan_mode`` levels (0-based index
-    into the ordered list) and is written via ``climate.set_fan_mode`` instead
-    of the ``fan.set_percentage`` used by standalone fans.
+    maps onto the climate's discrete ``fan_mode`` levels and is written via
+    ``climate.set_fan_mode`` instead of the ``fan.set_percentage`` used by
+    standalone fans. ``fanSpeed.value`` (1..10) spreads over the numbered
+    steps while ``fanSpeed.level`` names one of them (or ``auto``).
     """
     cap = DuerCapability(
         "fanSpeed",
@@ -875,30 +952,42 @@ def climate_fan_speed_mapping(
     def read(ctx: ReadContext) -> AttributeValue:
         state = ctx.entities.get("value")
         index = _climate_fan_index(state, _climate_fan_levels(state))
+        # 0 is off the 1..10 request scale, so it reads back as "not on a
+        # discrete speed step" — which is what an automatic fan mode is.
         return make_attribute(ATTR_FAN_SPEED, index if index is not None else 0, legal="[0, 10]")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         state = ctx.entities.get("value")
-        levels = _climate_fan_levels(state)
-        if not levels:
-            return None
         action = ctx.action.name
+
         if action == ACTION_SET_FAN_SPEED:
+            level = _fan_speed_level(ctx.payload)
+            if _is_auto_fan_mode(level):
+                auto = _climate_auto_fan_mode(state)
+                if auto is None:
+                    return None
+                return [ServiceCall("climate", "set_fan_mode", {"fan_mode": auto}, entity_id)]
             value = _num(_payload_value(ctx.payload, "fanSpeed"))
             if value is None:
+                value = _fan_level_scale(level)
+            levels = _climate_fan_levels(state)
+            if value is None or not levels:
                 return None
-            index = max(0, min(len(levels) - 1, round(value)))
-        elif action in (ACTION_INCREMENT_FAN_SPEED, ACTION_DECREMENT_FAN_SPEED):
-            current = _climate_fan_index(state, levels)
+            index = _fan_scale_to_step(value, len(levels))
+            return [ServiceCall("climate", "set_fan_mode", {"fan_mode": levels[index]}, entity_id)]
+
+        if action in (ACTION_INCREMENT_FAN_SPEED, ACTION_DECREMENT_FAN_SPEED):
+            steps = _climate_fan_steps(state)
+            current = _climate_fan_index(state, steps)
             if current is None:
                 return None
             delta = _payload_number(ctx.payload, "deltaFanSpeed", "fanSpeed")
             delta = 1 if delta is None else round(delta)
             step = delta if action == ACTION_INCREMENT_FAN_SPEED else -delta
-            index = max(0, min(len(levels) - 1, current + step))
-        else:
-            return None
-        return [ServiceCall("climate", "set_fan_mode", {"fan_mode": levels[index]}, entity_id)]
+            index = max(0, min(len(steps) - 1, current + step))
+            return [ServiceCall("climate", "set_fan_mode", {"fan_mode": steps[index]}, entity_id)]
+
+        return None
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 

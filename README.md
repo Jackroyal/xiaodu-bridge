@@ -18,7 +18,7 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.9**。
+当前集成版本：**v0.9.10**。
 
 ## 功能
 
@@ -50,7 +50,12 @@
 - **空调温控加减**：温度与风速同时支持小度 App/语音的 `set*` 与
   `increment/decrement`；语音绝对设定 `SetTemperatureRequest` 按官方载荷键
   `targetTemperature` 解析（含 CELSIUS/FAHRENHEIT 归一）；空调风速按 HA climate
-  的离散 `fan_mode` 档位（如 20/40/…/100/auto）映射，不再依赖不存在的 `percentage`。
+  的离散 `fan_mode` 档位（如 20/40/…/100）映射，不再依赖不存在的 `percentage`。
+  官方载荷的两种写法都支持：`fanSpeed.value`（1~10 线性铺到实际档位）与
+  `fanSpeed.level`（`min`/`low`/`middle`/`high`/`max`/`auto`），
+  说“把风速设为自动”不再返回不支持。
+- **自动风速单独识别**：美的等集成把自动风编码成数值档位 `102` 而非 `auto`，
+  该档位不再被当成“最高档”，只能通过 `auto` 档位词进入，加减档会以它为最高位。
 - **空调模式上报**：hvac 模式优先取实体 state（兼容美的等不提供 `hvac_mode`
   属性的集成），避免制冷中的空调被小度识别为“未知模式”。
 - **稳定设备身份**：通用/独立实体的 DuerOS appliance ID 以 HA 设备与实体唯一标识

@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.9**.
+Current version: **v0.9.10**.
 
 ## Features
 
@@ -65,7 +65,14 @@ Current version: **v0.9.9**.
   `increment/decrement` from the Xiaodu App/voice; the absolute `SetTemperatureRequest`
   is parsed from the official payload key `targetTemperature` (with CELSIUS/FAHRENHEIT
   normalization); AC fan speed maps to HA climate's discrete `fan_mode` steps (e.g.
-  20/40/…/100/auto) instead of a nonexistent `percentage`.
+  20/40/…/100) instead of a nonexistent `percentage`. Both official payload forms are
+  accepted — `fanSpeed.value` (1–10 spread over the actual steps) and `fanSpeed.level`
+  (`min`/`low`/`middle`/`high`/`max`/`auto`) — so "set the fan speed to auto" no longer
+  returns unsupported.
+- **Automatic fan mode detected separately**: integrations such as Midea encode the
+  automatic fan as the numeric step `102` rather than `auto`; it is no longer treated as
+  the fastest step, is reachable only through the `auto` level word, and sits above the
+  fastest step when stepping up or down.
 - **Climate mode reporting**: hvac mode prefers the entity state (compatible with
   integrations like Midea that don't provide an `hvac_mode` attribute), avoiding a
   cooling AC being reported as "unknown mode".
