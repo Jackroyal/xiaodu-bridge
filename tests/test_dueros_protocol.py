@@ -314,6 +314,32 @@ def test_control_offline_entity():
     assert result["header"]["name"] == "TargetOfflineError"
 
 
+def test_query_offline_entity_reports_offline_not_unsupported():
+    # A reading is missing *because* the device is unreachable; the contract has
+    # TargetOfflineError for exactly that, so the user hears "设备离线" instead
+    # of "不支持".
+    hass = FakeHass([
+        FakeState("sensor.temp", "unavailable", {
+            "friendly_name": "温度", "device_class": "temperature",
+            "unit_of_measurement": "°C",
+        }),
+    ])
+    devices = _device_map(hass, ["sensor.temp"], caps=["temperature"])
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_QUERY,
+                "GetTemperatureReadingRequest",
+                {"accessToken": "t",
+                 "appliance": {"applianceId": devices.all()[0].device_id}},
+            ),
+        )
+    )
+    assert result["header"]["name"] == "TargetOfflineError"
+
+
 def test_control_unsupported_action():
     result = run(
         handle_request(
@@ -327,6 +353,42 @@ def test_control_unsupported_action():
         )
     )
     assert result["header"]["name"] == "NotSupportedInCurrentModeError"
+    # error-message.md requires errorInfo / currentDeviceMode on this error; the
+    # skill does not model appliance modes, so it reports the contract's OTHER.
+    assert result["payload"] == {"errorInfo": {"currentDeviceMode": "OTHER"}}
+
+
+def test_control_payload_token_outside_contract_enum_is_unsupported():
+    # SetSuctionRequest sends STANDARD / STRONG; a value outside that enum must
+    # not reach vacuum.set_fan_speed as if it were a fan speed of the vacuum.
+    hass = FakeHass([
+        FakeState("vacuum.robot", "cleaning", {
+            "friendly_name": "扫地机器人",
+            "fan_speed": "Standard",
+            "fan_speed_list": ["Silent", "Standard", "Strong", "Turbo"],
+        }),
+    ])
+    devices = _seed_enhanced(
+        hass, config={"vacuum.robot": {"caps": ["suction"]}},
+        device_of=lambda _eid: "vacuum.robot",
+    )
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "SetSuctionRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": devices.all()[0].device_id},
+                    "suction": {"value": "3"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "NotSupportedInCurrentModeError"
+    assert hass.service_calls == []
 
 
 def test_query_temperature():
@@ -858,8 +920,15 @@ def test_discovery_climate_advertises_increment_and_decrement():
     assert "targetTemperature" in attr_names
     assert "fanSpeed" in attr_names
     fan = next(a for a in app["attributes"] if a["name"] == "fanSpeed")
-    # current fan_mode "60" is index 2 in the ordered mode list.
-    assert fan["value"] == 2
+    # fanSpeed is reported as an integer on the contract's 1..10 scale — the
+    # same scale the write path resolves a requested speed against: the current
+    # fan_mode "60" is step 2 of the 5 numbered steps -> 1 + 2/4*9 = 5.5,
+    # rounded onto the scale = 6.
+    assert fan["value"] == 6
+    # Every appliance carries the two attributes attributes.md requires.
+    assert {"name", "connectivity"} <= attr_names
+    connectivity = next(a for a in app["attributes"] if a["name"] == "connectivity")
+    assert connectivity["value"] == "REACHABLE"
 
 
 def test_discovery_climate_reports_mode_from_entity_state():
@@ -1878,28 +1947,34 @@ def test_control_yuba_set_mode_routes_to_function_switch():
 
 
 def test_control_yuba_unset_mode_turns_function_off():
-    hass = _yuba_hass()
-    devices = _yuba_map(hass)
-    aid = _device_id_of(devices, "switch.yuba_blow")
-    result = run(
-        handle_request(
-            hass,
-            devices,
-            _request(
-                NAMESPACE_CONTROL,
-                "UnSetModeRequest",
-                {
-                    "accessToken": "t",
-                    "appliance": {"applianceId": aid},
-                    "mode": {"value": "FAN"},
-                },
-            ),
+    # The contract's Control request is ``UnsetModeRequest`` while the discovery
+    # action list spells the action ``unSetMode``; both spellings must resolve.
+    for request_name, confirmation in (
+        ("UnsetModeRequest", "UnsetModeConfirmation"),
+        ("UnSetModeRequest", "UnSetModeConfirmation"),
+    ):
+        hass = _yuba_hass()
+        devices = _yuba_map(hass)
+        aid = _device_id_of(devices, "switch.yuba_blow")
+        result = run(
+            handle_request(
+                hass,
+                devices,
+                _request(
+                    NAMESPACE_CONTROL,
+                    request_name,
+                    {
+                        "accessToken": "t",
+                        "appliance": {"applianceId": aid},
+                        "mode": {"value": "FAN"},
+                    },
+                ),
+            )
         )
-    )
-    assert result["header"]["name"] == "UnSetModeConfirmation"
-    assert hass.service_calls == [
-        ("switch", "turn_off", {"entity_id": "switch.yuba_blow"})
-    ]
+        assert result["header"]["name"] == confirmation
+        assert hass.service_calls == [
+            ("switch", "turn_off", {"entity_id": "switch.yuba_blow"})
+        ]
 
 
 def test_control_yuba_turn_off_shuts_all_functions():

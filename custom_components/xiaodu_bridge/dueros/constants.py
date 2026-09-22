@@ -18,7 +18,13 @@ ERROR_OFFLINE = "TargetOfflineError"
 ERROR_UNSUPPORTED = "NotSupportedInCurrentModeError"
 ERROR_SERVICE = "DriverInternalError"
 
-# Action names (header.name with the "Request" suffix stripped)
+# 每台设备最多同步的属性数量（discovery-message.md / attributes-report.md）
+MAX_ATTRIBUTES_PER_APPLIANCE = 10
+
+# Action names (header.name with the "Request" suffix stripped).
+# NOTE: the discovery action list spells ``unSetMode`` while the Control request
+# in the same contract is ``UnsetModeRequest``; the dispatcher matches action
+# names case-insensitively so both spellings resolve to one action.
 ACTION_TURN_ON = "turnOn"
 ACTION_TURN_OFF = "turnOff"
 ACTION_TIMING_TURN_ON = "timingTurnOn"
@@ -90,3 +96,37 @@ ATTR_MUTE_STATE = "muteState"
 ATTR_HUMIDITY = "humidity"
 ATTR_TARGET_HUMIDITY = "targetHumidity"
 ATTR_WORK_STATE = "workState"
+# 查询响应字段名（query-message.md 的 GetTimeLeftResponse 用它，不是属性名）
+ATTR_TIME_LEFT_IN_SECONDS = "timeLeftInSeconds"
+
+# --- 契约枚举（原文取值，勿按设备自造） ---------------------------------------
+# attributes.md 的属性取值 / control-message.md 的请求取值。设备侧（HA 实体）的
+# 选项目录由集成自己命名（低档/Weak/Standard…），由 composer 按这些枚举做双向解析。
+WARMTH_LEVEL_VALUES = ("LOW", "MIDDLE", "HIGH")            # attributes.md warmthLevel
+WATER_LEVEL_VALUES = ("LOW", "MEDIUM", "HIGH")             # attributes.md waterLevel
+SUCTION_VALUES = ("STANDARD", "STRONG")                    # attributes.md suction
+WORK_STATE_VALUES = (                                       # attributes.md workState
+    "STOP",
+    "START",
+    "PAUSE",
+    "WORKING",
+    "WORK_NEARLY_FINISHED",
+    "DONE",
+)
+WASHING_MODE_VALUES = (                                     # 模式表 WASHING_MACHINE
+    "STANDARD",
+    "DRY",
+    "WASH_DRY",
+    "FAST_WASH",
+    "DOWN_JACKET",
+)
+# SetGearRequest.gear.value：档位刻度（AUTO / RANDOM 不在刻度上，见 composer）
+GEAR_VALUES = (
+    "MIN",
+    "LOW",
+    "MIDDLE_LOW",
+    "MIDDLE",
+    "MIDDLE_HIGH",
+    "HIGH",
+    "MAX",
+)

@@ -22,20 +22,38 @@ from xiaodu.dueros.model import (
 )
 from xiaodu.dueros.composers import (
     composite_power_mapping,
+    enum_value_mapping,
     mode_switches_mapping,
     pause_mapping,
     percentage_mapping,
     power_mapping,
     select_mapping,
+    sensor_enum_mapping,
     sensor_query_mapping,
     target_temperature_mapping,
+    time_left_mapping,
 )
 from xiaodu.dueros.constants import (
+    ATTR_FAN_SPEED,
     ATTR_MODE,
+    ATTR_SUCTION,
     ATTR_TARGET_TEMPERATURE,
     ATTR_TURN_ON_STATE,
     ATTR_WARMTH_LEVEL,
+    ATTR_WATER_LEVEL,
+    ATTR_WORK_STATE,
     ATTR_PERCENTAGE,
+    SUCTION_VALUES,
+    WARMTH_LEVEL_VALUES,
+    WASHING_MODE_VALUES,
+    WATER_LEVEL_VALUES,
+    WORK_STATE_VALUES,
+    GEAR_VALUES,
+)
+from xiaodu.dueros.profiles import (
+    SUCTION_ALIASES,
+    WARMTH_LEVEL_ALIASES,
+    WORK_STATE_ALIASES,
 )
 
 
@@ -158,28 +176,285 @@ def test_mode_switches_write_fanout():
     ]
 
 
-# --- select_mapping (warmthLevel via setGear) ---
+# --- select_mapping (generic select: option label is the DuerOS value) ---
 
 def test_select_mapping_read_write():
     m = select_mapping(
+        entity_id="select.fan_speed",
+        attribute_name=ATTR_FAN_SPEED,
+        capability_key="fanSpeed",
+        appliance_types=("FAN",),
+        set_action="setFanSpeed",
+    )
+    ctxr = __import__("types").SimpleNamespace(
+        entities={"value": FakeState("select.fan_speed", "select", {"option": "低档"})}
+    )
+    val = m.read(ctxr)
+    assert val.name == ATTR_FAN_SPEED and val.value == "低档"
+    ctxw = __import__("types").SimpleNamespace(
+        action=DuerAction("setFanSpeed", "fanSpeed", "fanSpeed"),
+        payload={"fanSpeed": {"value": "低档"}},
+    )
+    calls = m.write(ctxw)
+    assert calls[0].domain == "select"
+    assert calls[0].data == {"option": "低档"}
+
+
+# --- enum_value_mapping (contract enum <-> device vocabulary) ---
+
+def test_enum_value_mapping_gear_resolves_position_and_reads_enum():
+    m = enum_value_mapping(
         entity_id="select.warmth_level",
         attribute_name=ATTR_WARMTH_LEVEL,
         capability_key="warmthLevel",
         appliance_types=("YUBA",),
+        tokens=WARMTH_LEVEL_VALUES,
+        write_tokens=GEAR_VALUES,
         set_action="setGear",
+        payload_key="gear",
+        ordered=True,
+        aliases=WARMTH_LEVEL_ALIASES,
     )
-    ctxr = __import__("types").SimpleNamespace(
-        entities={"value": FakeState("select.warmth_level", "select", {"option": "暖风"})}
+    state = FakeState(
+        "select.warmth_level", "select",
+        {"option": "强暖", "options": ["弱暖", "强暖", "恒温"]},
     )
-    val = m.read(ctxr)
-    assert val.name == ATTR_WARMTH_LEVEL and val.value == "暖风"
-    ctxw = __import__("types").SimpleNamespace(
-        action=DuerAction("setGear", "warmthLevel", "warmthLevel"),
-        payload={"warmthLevel": {"value": "强暖"}},
+
+    def write(payload):
+        return m.write(__import__("types").SimpleNamespace(
+            action=DuerAction("setGear", "warmthLevel", "gear"),
+            payload=payload,
+            entities={"value": state},
+        ))
+
+    assert write({"gear": {"value": "HIGH", "scale": "挡"}})[0].data == {"option": "强暖"}
+    assert write({"gear": {"value": "LOW", "scale": "挡"}})[0].data == {"option": "弱暖"}
+    assert write({"gear": {"value": "MIDDLE", "scale": "挡"}})[0].data == {"option": "恒温"}
+    assert write({"warmthLevel": {"value": "HIGH"}}) is None
+    assert m.read(__import__("types").SimpleNamespace(
+        entities={"value": state})).value == "HIGH"
+    # An unknown label is omitted rather than reported outside legalValue.
+    assert m.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState(
+            "select.warmth_level", "select", {"option": "舒适", "options": ["舒适"]})}
+    )) is None
+
+
+def test_enum_value_mapping_suction_matches_contract_tokens():
+    m = enum_value_mapping(
+        entity_id="vacuum.robot",
+        attribute_name=ATTR_SUCTION,
+        capability_key="suction",
+        appliance_types=("SWEEPING_ROBOT",),
+        tokens=SUCTION_VALUES,
+        set_action="setSuction",
+        domain="vacuum",
+        service="set_fan_speed",
+        data_key="fan_speed",
+        options_attr="fan_speed_list",
+        read_attr="fan_speed",
+        ordered=True,
+        aliases=SUCTION_ALIASES,
     )
-    calls = m.write(ctxw)
-    assert calls[0].domain == "select"
-    assert calls[0].data == {"option": "强暖"}
+    attributes = {
+        "fan_speed": "Quiet",
+        "fan_speed_list": ["Quiet", "Balanced", "Turbo", "Max"],
+    }
+    state = FakeState("vacuum.robot", "cleaning", attributes)
+    assert m.read(__import__("types").SimpleNamespace(entities={"value": state})).value == "STANDARD"
+    calls = m.write(__import__("types").SimpleNamespace(
+        action=DuerAction("setSuction", "suction", "suction"),
+        payload={"suction": {"value": "STRONG"}},
+        entities={"value": state},
+    ))
+    assert calls[0].data == {"fan_speed": "Max"}
+
+
+def test_sensor_enum_mapping_maps_states_and_omits_unknown():
+    m = sensor_enum_mapping(
+        entity_id="sensor.run_state",
+        attribute_name=ATTR_WORK_STATE,
+        capability_key="workState",
+        appliance_types=("WASHING_MACHINE",),
+        tokens=WORK_STATE_VALUES,
+        aliases=WORK_STATE_ALIASES,
+    )
+
+    def read(state_value):
+        return m.read(__import__("types").SimpleNamespace(
+            entities={"value": FakeState("sensor.run_state", state_value)}))
+
+    assert read("运行中").value == "WORKING"
+    assert read("done").value == "DONE"
+    assert read("神秘状态") is None
+
+
+def test_enum_value_mapping_ordered_fallback_uses_positions():
+    # No alias matches a device that names its levels 一档..四档; an ordered
+    # vocabulary still resolves the token's position onto those steps.
+    m = enum_value_mapping(
+        entity_id="select.level",
+        attribute_name=ATTR_WATER_LEVEL,
+        capability_key="waterLevel",
+        appliance_types=("WASHING_MACHINE",),
+        tokens=WATER_LEVEL_VALUES,
+        set_action="setWaterLevel",
+        ordered=True,
+    )
+    options = ["一档", "二档", "三档", "四档"]
+    state = FakeState("select.level", "select", {"option": "三档", "options": options})
+
+    def write(token):
+        return m.write(__import__("types").SimpleNamespace(
+            action=DuerAction("setWaterLevel", "waterLevel", "waterLevel"),
+            payload={"waterLevel": {"value": token}},
+            entities={"value": state},
+        ))
+
+    assert write("LOW")[0].data == {"option": "一档"}
+    assert write("HIGH")[0].data == {"option": "四档"}
+    assert write("MEDIUM")[0].data == {"option": "三档"}
+    # ...and positions map back to the enum.
+    for option, token in (("一档", "LOW"), ("三档", "MEDIUM"), ("四档", "HIGH")):
+        value = m.read(__import__("types").SimpleNamespace(
+            entities={"value": FakeState(
+                "select.level", "select", {"option": option, "options": options})}
+        ))
+        assert value.value == token
+
+
+def test_enum_value_mapping_exact_contract_token_passes_through():
+    # An integration whose own values already are the contract tokens is driven
+    # verbatim — no alias or position guessing involved.
+    m = enum_value_mapping(
+        entity_id="vacuum.robot",
+        attribute_name=ATTR_SUCTION,
+        capability_key="suction",
+        appliance_types=("SWEEPING_ROBOT",),
+        tokens=SUCTION_VALUES,
+        set_action="setSuction",
+        domain="vacuum",
+        service="set_fan_speed",
+        data_key="fan_speed",
+        options_attr="fan_speed_list",
+        read_attr="fan_speed",
+    )
+    state = FakeState("vacuum.robot", "cleaning", {
+        "fan_speed": "STRONG", "fan_speed_list": ["STANDARD", "STRONG"],
+    })
+    assert m.read(__import__("types").SimpleNamespace(entities={"value": state})).value == "STRONG"
+    calls = m.write(__import__("types").SimpleNamespace(
+        action=DuerAction("setSuction", "suction", "suction"),
+        payload={"suction": {"value": "standard"}},  # case-insensitive match
+        entities={"value": state},
+    ))
+    assert calls[0].data == {"fan_speed": "STANDARD"}
+
+
+def test_enum_value_mapping_allow_custom_reports_vendor_modes():
+    # attributes.md's mode allows a vendor ``customName``: a listed value the
+    # alias table cannot name is still reported (with the entity's own
+    # legalValue) and accepted verbatim on the way in.
+    m = enum_value_mapping(
+        entity_id="select.wash_mode",
+        attribute_name=ATTR_MODE,
+        capability_key="mode",
+        appliance_types=("WASHING_MACHINE",),
+        tokens=WASHING_MODE_VALUES,
+        set_action="setMode",
+        allow_custom=True,
+        aliases={"FAST_WASH": ("快速",)},
+    )
+    options = ["快速洗", "单脱水"]
+    value = m.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState(
+            "select.wash_mode", "select", {"option": "快速洗", "options": options})}
+    ))
+    assert (value.value, value.legal) == ("FAST_WASH", "(STANDARD, DRY, WASH_DRY, FAST_WASH, DOWN_JACKET)")
+    custom = m.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState(
+            "select.wash_mode", "select", {"option": "单脱水", "options": options})}
+    ))
+    assert (custom.value, custom.legal) == ("单脱水", "(快速洗, 单脱水)")
+    calls = m.write(__import__("types").SimpleNamespace(
+        action=DuerAction("setMode", "mode", "mode"),
+        payload={"mode": {"value": "单脱水"}},
+        entities={"value": FakeState(
+            "select.wash_mode", "select", {"option": "快速洗", "options": options})},
+    ))
+    assert calls[0].data == {"option": "单脱水"}
+
+
+def test_sensor_enum_mapping_prefers_the_most_specific_alias():
+    m = sensor_enum_mapping(
+        entity_id="sensor.run_state",
+        attribute_name=ATTR_WORK_STATE,
+        capability_key="workState",
+        appliance_types=("WASHING_MACHINE",),
+        tokens=WORK_STATE_VALUES,
+        aliases=WORK_STATE_ALIASES,
+    )
+    # "烘干" (WORKING) is a substring of "烘干完成" — the longer, more specific
+    # alias (DONE) must win.
+    value = m.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState("sensor.run_state", "烘干完成")}
+    ))
+    assert value.value == "DONE"
+
+
+def test_select_reads_the_current_value_from_the_entity_state():
+    # A real HA ``select`` exposes its current option as the entity *state* —
+    # the ``option`` attribute does not exist on it, and reading only that
+    # attribute made every select-backed capability report an empty value.
+    m = enum_value_mapping(
+        entity_id="select.warmth_level",
+        attribute_name=ATTR_WARMTH_LEVEL,
+        capability_key="warmthLevel",
+        appliance_types=("YUBA",),
+        tokens=WARMTH_LEVEL_VALUES,
+        write_tokens=GEAR_VALUES,
+        set_action="setGear",
+        payload_key="gear",
+        ordered=True,
+        aliases=WARMTH_LEVEL_ALIASES,
+    )
+    options = ["弱暖(低热、暖风)", "强暖(高热、热风)", "恒温"]
+
+    def read(option):
+        # No ``option`` attribute: exactly what the Mi Home select looks like.
+        return m.read(__import__("types").SimpleNamespace(
+            entities={"value": FakeState("select.warmth_level", option, {"options": options})}
+        ))
+
+    assert read("恒温").value == "MIDDLE"
+    assert read("弱暖(低热、暖风)").value == "LOW"
+    assert read("强暖(高热、热风)").value == "HIGH"
+    # An unavailable select must not be reported as a level at all.
+    assert read("unavailable") is None
+
+    fan = select_mapping(
+        entity_id="select.fan_speed",
+        attribute_name=ATTR_FAN_SPEED,
+        capability_key="fanSpeed",
+        appliance_types=("YUBA",),
+        set_action="setFanSpeed",
+        ordered_options=True,
+    )
+    value = fan.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState(
+            "select.fan_speed", "高档", {"options": ["低档", "高档"]})}
+    ))
+    assert value.value == 10
+
+
+def test_time_left_mapping_converts_to_seconds():
+    m = time_left_mapping(entity_id="sensor.time_left", appliance_types=("WASHING_MACHINE",))
+    attr = m.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState(
+            "sensor.time_left", "45", {"unit_of_measurement": "min"})}
+    ))
+    assert (attr.name, attr.value) == ("timeLeftInSeconds", 2700)
+    assert m.capability.query_names == ("GetTimeLeftRequest",)
 
 
 # --- target_temperature / percentage / sensor_query ---

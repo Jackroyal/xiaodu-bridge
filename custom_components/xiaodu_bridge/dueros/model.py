@@ -224,7 +224,26 @@ class DuerDevice:
         return None
 
     def find_action(self, action_name: str) -> tuple[CapabilityMapping, DuerAction] | None:
-        """Return (capability mapping, action) for a DuerOS action name."""
+        """Return (capability mapping, action) for a DuerOS action name.
+
+        Falls back to a case-insensitive match: the contract's discovery action
+        list spells ``unSetMode`` while its Control request is
+        ``UnsetModeRequest``, so the name DuerOS sends is not always the
+        advertised spelling (and the difference is only letter case).
+        """
+        found = self._find_action_exact(action_name)
+        if found is not None:
+            return found
+        folded = action_name.lower()
+        for cap in self.capabilities:
+            for action in cap.capability.actions:
+                if action.name.lower() == folded:
+                    return cap, action
+        return None
+
+    def _find_action_exact(
+        self, action_name: str
+    ) -> tuple[CapabilityMapping, DuerAction] | None:
         for cap in self.capabilities:
             for action in cap.capability.actions:
                 if action.name == action_name:

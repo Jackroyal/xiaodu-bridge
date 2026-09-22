@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.11**.
+Current version: **v0.9.12**.
 
 ## Features
 
@@ -31,63 +31,29 @@ Current version: **v0.9.11**.
   washing machines have dedicated profiles; lights, switches, fans, climate, covers,
   media players, sockets, and temperature/humidity sensors are synthesized from generic
   capabilities.
-- **Config flow and options flow**: configure OAuth Client ID / Secret, botId, callback
-  URL, and public URL when adding the integration; afterwards select which devices to
-  expose via "device → capability".
-- **Per-device advanced overrides**: configure each device individually — limit exposed
-  capabilities, hide entities (not exposed to Xiaodu, and not participating in role
-  detection/aggregation), bind a semantic role to a specific entity (overriding
-  auto-detection), force "split as single devices" or a specific device type (with
-  automatic fallback when it cannot be built), and rename a Xiaodu device's display
-  name independently (without affecting the HA entity name). Legacy flat / per-entity
-  capability configs are migrated automatically on read.
-- **OAuth 2.0**: provides an authorization page and a token endpoint. Access tokens last
-  7 days, refresh tokens 30 days, with `refresh_token` renewal.
+- **Config flow and options flow**: configure OAuth credentials, botId, and the public
+  URL when adding the integration; afterwards select which devices to expose via
+  "device → capability", with per-device overrides: limit capabilities, hide entities,
+  bind a semantic role, or rename the Xiaodu-side display name (without touching the HA
+  entity name).
+- **OAuth 2.0 server**: provides an authorization page and a token endpoint; access
+  tokens last 7 days, refresh tokens 30 days, with renewal. Issued tokens are private to
+  this integration and cannot access the HA API.
 - **Discovery / Query / Control**: compatible with both the Xiaodu console mock-testing
   DCS multipart and the production JSON messages.
-- **Proactive state reporting**: sends a Change Report to Xiaodu when controllable
-  device state changes; read-only sensors do not report.
-- **Room grouping**: syncs HA areas as DuerOS `discoveredGroups`.
-- **Timed on/off**: supports `timingTurnOn` / `timingTurnOff`, persisted via HA Storage
-  and restored after restart.
-- **Single hub device**: the device registry keeps a single "Xiaodu hub"; bridged HA
-  devices are not duplicated in the device list.
-- **Automatic device-set refresh**: after adding/removing/renaming entities, devices, or
-  areas, the cached device set is invalidated and rebuilt; Discovery always reflects the
-  current HA state, so new devices are discoverable without a restart.
-- **Temperature unit normalization**: sensor temperature is normalized to HA's unit
-  system (`hass.config.units`) before reporting (metric = Celsius); non-numeric readings
-  such as `unknown`/`unavailable` are no longer reported as 0.0.
-- **Independent light devices**: the light on composite devices (bathroom heater, clothes
-  airer) is split into a separate `LIGHT` device; brightness/color-temperature/color are
-  exposed based on the entity's actual capabilities.
-- **Climate temperature increments**: temperature and fan speed support both `set*` and
-  `increment/decrement` from the Xiaodu App/voice; the absolute `SetTemperatureRequest`
-  is parsed from the official payload key `targetTemperature` (with CELSIUS/FAHRENHEIT
-  normalization); AC fan speed maps to HA climate's discrete `fan_mode` steps (e.g.
-  20/40/…/100) instead of a nonexistent `percentage`. Both official payload forms are
-  accepted — `fanSpeed.value` (1–10 spread over the actual steps) and `fanSpeed.level`
-  (`min`/`low`/`middle`/`high`/`max`/`auto`) — so "set the fan speed to auto" no longer
-  returns unsupported.
-- **Automatic fan mode detected separately**: integrations such as Midea encode the
-  automatic fan as the numeric step `102` rather than `auto`; it is no longer treated as
-  the fastest step, is reachable only through the `auto` level word, and sits above the
-  fastest step when stepping up or down.
-- **Control payloads parsed per the protocol contract**: volume, mute, TV channel, color
-  temperature and target humidity used to read payload keys that do not exist in the
-  protocol (`volume` / `channel` / `colorTemperature` / `humidity`), so setting them by
-  voice answered "unsupported"; they now read `deltaValue` (volume / channel / humidity),
-  `deltaValue.value` as `on`/`off` (mute) and `colorTemperatureInKelvin` (color
-  temperature). The incremental messages (temperature / fan-speed up-down) likewise use
-  the contract's `deltaValue`, and a temperature delta is converted as a difference
-  (no absolute-temperature offset) — "raise by two degrees" no longer moves one step.
-- **Climate mode reporting**: hvac mode prefers the entity state (compatible with
-  integrations like Midea that don't provide an `hvac_mode` attribute), avoiding a
-  cooling AC being reported as "unknown mode".
-- **Stable device identity**: generic/standalone entity DuerOS appliance IDs are anchored
-  to HA device and entity unique IDs, so renaming an entity in HA keeps the Xiaodu-side
-  device identity stable (no delete-and-recreate); orphaned entities without a device
-  keep their original behavior.
+- **State reporting and timers**: sends a Change Report to Xiaodu when controllable
+  device state changes; supports `timingTurnOn` / `timingTurnOff`, persisted and
+  restored after restart.
+- **Device and room management**: HA areas can sync as DuerOS `discoveredGroups`; the
+  device registry keeps a single "Xiaodu hub", renaming an entity does not recreate the
+  Xiaodu-side device, and the device set refreshes automatically so new devices are
+  discoverable without a restart.
+
+## Best practices
+
+- ["HA Tinkering Notes: From Mi Home and Midea to Xiaodu and HomeKit"](https://mp.weixin.qq.com/s/vCMu2KMSknTfMnio1MwWNA) — a real-world
+  deployment write-up: connecting Mi Home / Sonoff / Midea devices to HA and handing
+  them to Xiaodu and HomeKit.
 
 ## Requirements
 
@@ -234,16 +200,34 @@ capabilities.
 | `continue` | Continue | Control | — |
 | `temperature` | Temperature | Read-only | `temperature` |
 | `humidity` | Humidity | Read-only | `humidity` |
-| `warmthLevel` | Warmth level | Control | `warmthLevel` |
+| `warmthLevel` | Warmth level | Control | `warmthLevel` (request field `gear`) |
 | `electricityCapacity` | Battery level | Read-only | `electricityCapacity` |
 | `workState` | Run state | Read-only | `workState` |
-| `timeLeft` | Time left | Read-only | `timeLeft` |
+| `timeLeft` | Time left | Read-only | `timeLeftInSeconds` |
 
 Control capabilities map to DuerOS actions (`turnOn` / `turnOff` / `set*` / `increment*`
 / `decrement*` / `pause` / `continue` / `timingTurnOn` / `timingTurnOff`, …); read-only
 capabilities surface only as attributes for Query. Sensor temperature is normalized to
 HA's unit system before reporting (metric = Celsius); non-numeric readings such as
 `unknown` / `unavailable` produce no attribute.
+
+Capabilities whose values are a **contract enum** (`suction` / `waterLevel` /
+`warmthLevel` / `mode`) are resolved both ways against the entity's own candidates:
+identical value first, then alias keywords (标准 / 强力 / 低 / 中 / 高 / 快洗 …), and
+lastly the position on an ordered scale. A request that resolves to nothing answers
+"unsupported" and an unmappable reading is omitted, so a vendor's label is never
+reported as a contract value. The alias tables live at the top of `dueros/profiles.py`.
+
+Two exceptions: `mode` allows a vendor `customName` per the contract, so an unrecognized
+mode name is reported and accepted verbatim (with the entity's own candidates as
+`legalValue`); and fan speed (`fanSpeed`) reads back the **integer** position on the
+1–10 scale that writes use. Each appliance reports at most 10 attributes (the protocol
+maximum) — Discovery, control confirmations and queries share one builder that
+deduplicates by name and keeps the baseline `name` / `connectivity` first.
+
+A `select`'s current position is read from the entity **state** (HA select entities do
+not expose an `option` attribute), so capabilities such as the bathroom heater's warmth
+level / fan gear report the actual current level instead of an empty value.
 
 ## Configuring devices and capabilities
 

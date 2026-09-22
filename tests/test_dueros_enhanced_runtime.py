@@ -67,7 +67,9 @@ _YUBA = [
     FakeState("switch.heating", "on", {"friendly_name": "取暖"}),
     FakeState("switch.blow", "off", {"friendly_name": "吹风"}),
     FakeState("switch.ventilation", "off", {"friendly_name": "换气"}),
-    FakeState("select.warmth_level", "select", {"friendly_name": "热度档位", "option": "暖风"}),
+    FakeState("select.warmth_level", "select", {
+        "friendly_name": "热度档位", "option": "弱暖", "options": ["弱暖", "强暖", "恒温"],
+    }),
 ]
 
 def _states():

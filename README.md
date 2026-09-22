@@ -18,55 +18,21 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.11**。
+当前集成版本：**v0.9.12**。
 
 ## 功能
 
-- **语义设备模型**：设备按 DuerOS 语义暴露，而不是拆成零散实体。浴霸、晾衣杆、
-  扫地机、洗衣机有专用档案；灯、开关、风扇、空调、窗帘、媒体播放器、插座、
-  温湿度传感器等使用通用能力合成。
-- **配置流与选项流**：添加集成时配置 OAuth Client ID / Secret、botId、回调地址、
-  公网地址；添加后按「设备 → 能力」选择要暴露的设备。
-- **每设备进阶覆写**：可对单个设备单独设置——限制暴露的能力、隐藏实体（不暴露给
-  小度，也不参与角色识别/聚合）、把语义角色绑定到指定实体（覆盖自动识别）、强制
-  按「单个设备拆分」或指定设备类型构建（构建不出时自动回退）、以及单独修改某个小度
-  设备的展示名（不影响 HA 实体名）。旧版扁平 / 逐实体能力配置会在读取时自动迁移。
-- **OAuth 2.0**：提供授权页与 Token 端点。Access Token 有效期 7 天，Refresh Token
-  有效期 30 天，支持 `refresh_token` 续期。
-- **Discovery / Query / Control**：兼容小度控制台模拟测试的 DCS multipart 与线上
-  JSON 报文。
-- **主动状态上报**：可控制设备状态变化时向小度发送 Change Report；纯只读传感器不上报。
-- **房间分组**：可把 HA 区域同步为 DuerOS `discoveredGroups`。
-- **定时开关**：支持 `timingTurnOn` / `timingTurnOff`，定时信息通过 HA Storage
-  持久化，重启后自动恢复。
-- **单一中枢设备**：设备注册表只保留一个「小度中枢」，桥接的 HA 设备不再重复
-  出现在设备列表中。
-- **设备集自动刷新**：新增/移除/改名实体、设备或区域后，设备集缓存自动失效重建，
-  Discovery 始终按当前 HA 状态构建，新设备无需重启即可被小度发现。
-- **温度单位归一化**：传感器温度按 HA 单位系统（`hass.config.units`）归一化
-  上报（公制即统一摄氏度）；`unknown`/`unavailable` 等非数值读数不再上报 0.0。
-- **独立灯设备**：浴霸、晾衣杆等复合设备的灯拆分为独立 `LIGHT` 设备，
-  亮度/色温/颜色等能力按 HA 实体实际能力自动暴露。
-- **空调温控加减**：温度与风速同时支持小度 App/语音的 `set*` 与
-  `increment/decrement`；语音绝对设定 `SetTemperatureRequest` 按官方载荷键
-  `targetTemperature` 解析（含 CELSIUS/FAHRENHEIT 归一）；空调风速按 HA climate
-  的离散 `fan_mode` 档位（如 20/40/…/100）映射，不再依赖不存在的 `percentage`。
-  官方载荷的两种写法都支持：`fanSpeed.value`（1~10 线性铺到实际档位）与
-  `fanSpeed.level`（`min`/`low`/`middle`/`high`/`max`/`auto`），
-  说“把风速设为自动”不再返回不支持。
-- **自动风速单独识别**：美的等集成把自动风编码成数值档位 `102` 而非 `auto`，
-  该档位不再被当成“最高档”，只能通过 `auto` 档位词进入，加减档会以它为最高位。
-- **控制载荷按契约解析**：音量、静音、电视频道、色温、目标湿度此前读的是协议里
-  不存在的载荷键（如 `volume`/`channel`/`colorTemperature`/`humidity`），语音设置
-  会落到“不支持”；现按契约改为 `deltaValue`（音量/频道/湿度）、
-  `deltaValue.value` 的 `on`/`off`（静音）、`colorTemperatureInKelvin`（色温）。
-  增量类消息（温度 / 风速加减）同样改用契约的 `deltaValue`，温度增量按差值换算单位
-  （不套用绝对温度换算的偏移），“调高两度”不再只动一档。
-- **空调模式上报**：hvac 模式优先取实体 state（兼容美的等不提供 `hvac_mode`
-  属性的集成），避免制冷中的空调被小度识别为“未知模式”。
-- **稳定设备身份**：通用/独立实体的 DuerOS appliance ID 以 HA 设备与实体唯一标识
-  锚定，实体在 HA 中改名后小度侧设备身份保持不变（不再删旧建新）；无设备归属的
-  孤立实体保持原行为。
+- **语义设备模型**：设备按 DuerOS 语义暴露，而不是拆成零散实体。浴霸、晾衣杆、扫地机、洗衣机有专用档案；灯、开关、风扇、空调、窗帘、媒体播放器、插座、温湿度传感器等按通用能力合成。
+- **配置流与选项流**：添加集成时配置 OAuth 凭证、botId、公网地址；添加后按「设备 → 能力」选择要暴露的设备，可对单个设备覆写：限制能力、隐藏实体、绑定语义角色、改展示名（不动 HA 实体名）。
+- **OAuth 2.0 服务端**：提供授权页与 Token 端点；Access Token 7 天、Refresh Token 30 天，支持续期。签发的 token 仅限本集成使用，不能访问 HA API。
+- **Discovery / Query / Control**：兼容小度控制台模拟测试的 DCS multipart 与线上 JSON 两种报文。
+- **状态上报与定时**：可控设备状态变化时主动向小度发送 Change Report；支持 `timingTurnOn` / `timingTurnOff`，定时信息持久化，重启后自动恢复。
+- **设备与房间管理**：HA 区域可同步为 DuerOS `discoveredGroups`；设备注册表只保留一个「小度中枢」，实体改名不会让小度侧设备重建，设备集变更自动刷新，新设备无需重启即可被发现。
+
+## 最佳实践
+
+- 《[HA 折腾记：从米家、美的到小度和 HomeKit](https://mp.weixin.qq.com/s/vCMu2KMSknTfMnio1MwWNA)》——一篇实际部署记录：
+  家里的米家 / Sonoff / 美的设备接进 HA，再交给小度与 HomeKit 的完整链路。
 
 ## 要求
 
@@ -203,15 +169,30 @@ Home Assistant :8123
 | `continue` | 继续 | 控制 | — |
 | `temperature` | 温度 | 只读 | `temperature` |
 | `humidity` | 湿度 | 只读 | `humidity` |
-| `warmthLevel` | 暖风档位 | 控制 | `warmthLevel` |
+| `warmthLevel` | 暖风档位 | 控制 | `warmthLevel`（请求字段 `gear`） |
 | `electricityCapacity` | 电量 | 只读 | `electricityCapacity` |
 | `workState` | 运行状态 | 只读 | `workState` |
-| `timeLeft` | 剩余时间 | 只读 | `timeLeft` |
+| `timeLeft` | 剩余时间 | 只读 | `timeLeftInSeconds` |
 
 控制类能力映射为 DuerOS 动作（`turnOn` / `turnOff` / `set*` / `increment*` /
 `decrement*` / `pause` / `continue` / `timingTurnOn` / `timingTurnOff` 等）；只读
 能力仅作为属性，供 Query 查询。传感器温度按 HA 单位系统归一化上报（公制即统一
 摄氏度）；`unknown` / `unavailable` 等非数值读数不产生属性。
+
+`suction` / `waterLevel` / `warmthLevel` / `mode` 这类取值是**契约枚举**的能力，
+按实体自身的候选值双向解析：先比对同名值，再按别名关键词（标准 / 强力 / 低 / 中 /
+高 / 快洗 …）匹配，有序档位最后按位置换算；解析不到时控制返回“不支持”，读取则
+不上报该属性（不会把厂商自己的档位名当成契约取值报给小度）。别名表在
+`dueros/profiles.py` 顶部，集成换了措辞改那里即可。
+
+两处例外：`mode` 属性按契约允许 `customName`（厂商自定义模式），认不出的模式名照
+原样上报与下发，`legalValue` 用实体自己的候选值；风速（`fanSpeed`）读回的是 1~10
+档位刻度上的**整数**位置，与写入用的是同一刻度。每台设备最多同步 10 个属性（协议
+上限），Discovery / 控制确认 / 查询共用同一个构造，按名去重且基线属性（`name` /
+`connectivity`）优先。
+
+`select` 类实体的当前档位取自实体 **state**（HA 的 select 不提供 `option` 属性），
+所以暖风档位 / 风机档位这类能力会真正上报当前档位，而不是空值。
 
 ## 配置设备与能力
 

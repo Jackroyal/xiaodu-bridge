@@ -4,6 +4,7 @@ from tests._dueros_loader import load_semantic_model
 
 registry_mod = load_semantic_model()
 
+from xiaodu.dueros.composers import select_mapping
 from xiaodu.dueros.model import DuerAction, DuerDeviceProfile, DeviceBuildContext, make_device_id
 from xiaodu.dueros.registry import ProfileRegistry
 from xiaodu.dueros.profiles import YUBA_PROFILE, build_yuba, match_role, register_default_profiles
@@ -23,7 +24,7 @@ def _yuba_states():
         FakeState("switch.heating", "on", {"friendly_name": "取暖"}),
         FakeState("switch.blow", "off", {"friendly_name": "吹风"}),
         FakeState("switch.ventilation", "off", {"friendly_name": "换气"}),
-        FakeState("select.warmth_level", "select", {"friendly_name": "热度档位", "option": "暖风"}),
+        FakeState("select.warmth_level", "select", {"friendly_name": "热度档位", "option": "强暖", "options": ["弱暖", "强暖", "恒温"]}),
         FakeState("select.fan_speed", "select", {"friendly_name": "风速", "option": "高档", "options": ["低档", "高档"]}),
         FakeState("number.target_temperature", "30", {"friendly_name": "设定温度"}),
     ]
@@ -94,11 +95,42 @@ def test_yuba_set_gear_and_temperature():
     dev = build_yuba(_ctx())[0]
     gear = next(c for c in dev.capabilities if c.key == "warmthLevel")
     ctx = _ctx()
-    gear_ctx = __import__("types").SimpleNamespace(
-        action=DuerAction("setGear", "warmthLevel", "warmthLevel"),
-        payload={"warmthLevel": {"value": "强暖"}}, entities={"value": ctx.find_state("select.warmth_level")})
-    gcalls = gear.write(gear_ctx)
-    assert gcalls[0].data == {"option": "强暖"}
+    state = ctx.find_state("select.warmth_level")
+
+    def calls(payload):
+        return gear.write(
+            __import__("types").SimpleNamespace(
+                action=DuerAction("setGear", "warmthLevel", "gear"),
+                payload=payload,
+                entities={"value": state},
+            )
+        )
+
+    # SetGearRequest carries the value under ``gear`` (control-message.md):
+    # HIGH -> 强暖, MIDDLE -> 恒温 (the vendor's middle option), MIN/LOW -> 弱暖.
+    assert calls({"gear": {"value": "HIGH", "scale": "挡"}})[0].data == {"option": "强暖"}
+    assert calls({"gear": {"value": "MIDDLE", "scale": "挡"}})[0].data == {"option": "恒温"}
+    assert calls({"gear": {"value": "MIN", "scale": "挡"}})[0].data == {"option": "弱暖"}
+    # Every position on the gear scale has a landing spot, so the mapping stays
+    # monotone instead of mixing alias and positional rules.
+    assert calls({"gear": {"value": "LOW", "scale": "挡"}})[0].data == {"option": "弱暖"}
+    assert calls({"gear": {"value": "MIDDLE_LOW", "scale": "挡"}})[0].data == {"option": "弱暖"}
+    assert calls({"gear": {"value": "MIDDLE_HIGH", "scale": "挡"}})[0].data == {"option": "强暖"}
+    assert calls({"gear": {"value": "MAX", "scale": "挡"}})[0].data == {"option": "强暖"}
+    # AUTO / RANDOM are not positions on the gear scale, and the payload this
+    # used to read (``warmthLevel``) does not exist in the protocol at all.
+    assert calls({"gear": {"value": "AUTO", "scale": "挡"}}) is None
+    assert calls({"gear": {"value": "RANDOM", "scale": "挡"}}) is None
+    assert calls({"warmthLevel": {"value": "强暖"}}) is None
+
+    # The reported attribute is the contract enum, not the vendor's label.
+    for option, token in (("弱暖", "LOW"), ("强暖", "HIGH"), ("恒温", "MIDDLE")):
+        val = gear.read(__import__("types").SimpleNamespace(
+            entities={"value": FakeState(
+                "select.warmth_level", "select",
+                {"option": option, "options": ["弱暖", "强暖", "恒温"]})}
+        ))
+        assert (val.name, val.value) == ("warmthLevel", token)
 
     temp = next(c for c in dev.capabilities if c.key == "targetTemperature")
     tctx = __import__("types").SimpleNamespace(
@@ -136,6 +168,32 @@ def test_yuba_set_fan_speed_maps_level_onto_option_order():
     assert calls({"fanSpeed": {"value": 1}})[0].data == {"option": "低档"}
     # No automatic option on this entity.
     assert calls({"fanSpeed": {"level": "auto"}}) is None
+
+    # The reading is the position on the contract's 1..10 scale — the same
+    # scale the write path resolves against — not the option label (which is
+    # not a fanSpeed value) and not the raw option index.
+    def read(option):
+        return fan.read(__import__("types").SimpleNamespace(
+            entities={"value": FakeState(
+                "select.fan_speed", "select",
+                {"option": option, "options": ["低档", "高档"]})}
+        ))
+
+    assert read("高档").value == 10
+    assert read("低档").value == 1
+    assert fan.capability.attributes[0].legal == "[0, 10]"
+
+    wide = select_mapping(
+        entity_id="select.fan_speed", attribute_name="fanSpeed", capability_key="fanSpeed",
+        appliance_types=("FAN",), set_action="setFanSpeed", ordered_options=True,
+    )
+    four = wide.read(__import__("types").SimpleNamespace(
+        entities={"value": FakeState(
+            "select.fan_speed", "select",
+            {"option": "中档", "options": ["低档", "中档", "高档", "超强"]})}
+    ))
+    # 4 steps: index 1 -> 1 + 1/3*9 = 4.0 on the 1..10 scale.
+    assert four.value == 4.0
 
 
 def test_yuba_off_turns_all_functions_off():

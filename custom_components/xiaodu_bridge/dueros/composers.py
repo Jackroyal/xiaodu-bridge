@@ -11,7 +11,7 @@ tested with fake ``State`` objects.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from .model import (
     CAP_KIND_CONTROL,
@@ -36,6 +36,7 @@ from .constants import (
     ATTR_PERCENTAGE,
     ATTR_TARGET_HUMIDITY,
     ATTR_TARGET_TEMPERATURE,
+    ATTR_TIME_LEFT_IN_SECONDS,
     ATTR_TURN_ON_STATE,
     ATTR_COLOR,
     ATTR_VOLUME,
@@ -199,15 +200,6 @@ def _turn_on_state_attr(value: bool) -> AttributeValue:
     return make_attribute(ATTR_TURN_ON_STATE, "ON" if value else "OFF", legal="(ON, OFF)")
 
 
-def _connectivity_attr(state: Any) -> AttributeValue:
-    reachable = state.state != "unavailable"
-    return make_attribute(
-        "connectivity",
-        "REACHABLE" if reachable else "UNREACHABLE",
-        legal="(UNREACHABLE, REACHABLE)",
-    )
-
-
 # --- composers ---------------------------------------------------------------
 
 def power_mapping(
@@ -228,8 +220,7 @@ def power_mapping(
         "开关",
         kind=CAP_KIND_CONTROL,
         appliance_types=appliance_types,
-        attributes=(DuerAttribute(ATTR_TURN_ON_STATE, "string", legal="(ON, OFF)"),
-                    DuerAttribute("connectivity", "string", legal="(UNREACHABLE, REACHABLE)")),
+        attributes=(DuerAttribute(ATTR_TURN_ON_STATE, "string", legal="(ON, OFF)"),),
         actions=tuple(DuerAction(a, capability_key) for a in actions),
     )
 
@@ -350,13 +341,28 @@ def select_mapping(
         "档位",
         kind=CAP_KIND_CONTROL,
         appliance_types=appliance_types,
-        attributes=(DuerAttribute(attribute_name, "string"),),
+        attributes=(
+            DuerAttribute(
+                attribute_name,
+                "number" if ordered_options else "string",
+                legal="[0, 10]" if ordered_options else "",
+            ),
+        ),
         actions=actions,
     )
 
     def read(ctx: ReadContext) -> AttributeValue:
         state = ctx.entities.get("value")
-        option = (state.attributes.get("option") if state else None) or ""
+        option = str(_current_value(state, None) or "")
+        if ordered_options:
+            # Ordered options are a speed scale: report the same 1..10 position
+            # the write path resolves a requested speed to (an option label is
+            # not a fanSpeed value, and an index would mean a different speed
+            # per device).
+            options = _entity_values(state, "options")
+            index = options.index(option) if option in options else -1
+            value = _fan_step_scale(index, len(options)) if index >= 0 else 0
+            return make_attribute(attribute_name, value, legal="[0, 10]")
         return make_attribute(attribute_name, option)
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
@@ -719,14 +725,22 @@ def color_mapping(
         "颜色",
         kind=CAP_KIND_CONTROL,
         appliance_types=appliance_types,
-        attributes=(DuerAttribute(ATTR_COLOR, "string"),),
+        # attributes.md color：hue 0~360、saturation/brightness 0~1 的对象
+        attributes=(DuerAttribute(ATTR_COLOR, "object", legal="OBJECT"),),
         actions=(DuerAction(ACTION_SET_COLOR, "color", "color"),),
     )
 
     def read(ctx: ReadContext) -> AttributeValue:
         state = ctx.entities.get("value")
         hs = (state.attributes.get("hs_color") if state else None) or []
-        return make_attribute(ATTR_COLOR, {"hue": hs[0], "saturation": hs[1] / 100} if len(hs) >= 2 else {"hue": 0, "saturation": 0})
+        brightness = _num(state.attributes.get("brightness") if state else None)
+        has_hs = len(hs) >= 2
+        value = {
+            "hue": hs[0] if has_hs else 0,
+            "saturation": hs[1] / 100 if has_hs else 0,
+            "brightness": round(brightness / 255, 4) if brightness is not None else 0,
+        }
+        return make_attribute(ATTR_COLOR, value, legal="OBJECT")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_COLOR:
@@ -752,7 +766,8 @@ def volume_mapping(
         "音量",
         kind=CAP_KIND_CONTROL,
         appliance_types=appliance_types,
-        attributes=(DuerAttribute(ATTR_VOLUME, "number", unit="%", legal="[0, 100]"),),
+        # attributes.md volume: 0..100, 无单位（scale 为空串）
+        attributes=(DuerAttribute(ATTR_VOLUME, "number", legal="[0, 100]"),),
         actions=(DuerAction(ACTION_SET_VOLUME, "volume", "volume"),),
     )
 
@@ -760,7 +775,7 @@ def volume_mapping(
         state = ctx.entities.get("value")
         level = _num(state.attributes.get("volume_level") if state else None)
         value = round(float(level) * 100) if level is not None else 0
-        return make_attribute(ATTR_VOLUME, value, scale="%", legal="[0, 100]")
+        return make_attribute(ATTR_VOLUME, value, legal="[0, 100]")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_VOLUME:
@@ -787,14 +802,15 @@ def mute_mapping(
         "静音",
         kind=CAP_KIND_CONTROL,
         appliance_types=appliance_types,
-        attributes=(DuerAttribute(ATTR_MUTE_STATE, "boolean", legal="(true, false)"),),
+        # attributes.md muteState: boolean value, legalValue "BOOLEAN".
+        attributes=(DuerAttribute(ATTR_MUTE_STATE, "boolean", legal="BOOLEAN"),),
         actions=(DuerAction(ACTION_SET_VOLUME_MUTE, "mute", "mute"),),
     )
 
     def read(ctx: ReadContext) -> AttributeValue:
         state = ctx.entities.get("value")
         muted = bool(state.attributes.get("is_volume_muted")) if state else False
-        return make_attribute(ATTR_MUTE_STATE, muted, legal="(true, false)")
+        return make_attribute(ATTR_MUTE_STATE, muted, legal="BOOLEAN")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         if ctx.action.name != ACTION_SET_VOLUME_MUTE:
@@ -893,6 +909,21 @@ def _fan_scale_to_step(value: float, count: int) -> int:
     return round((min(10.0, max(1.0, value)) - 1) / 9 * (count - 1))
 
 
+def _fan_step_scale(index: int, count: int) -> int:
+    """A device step's position on the DuerOS 1..10 fanSpeed scale.
+
+    The inverse of :func:`_fan_scale_to_step`, so a fan speed read back reports
+    the same position DuerOS would have named on the way in (an index is
+    device-relative and would mean a different speed per device). attributes.md
+    declares fanSpeed as an integer, so the position is rounded (half up) onto
+    the scale instead of reported as a fraction.
+    """
+    if count <= 1:
+        return 1
+    step = max(0, min(count - 1, index))
+    return 1 + (step * 9 + (count - 1) // 2) // (count - 1)
+
+
 def _fan_level_step(level: str, count: int) -> int | None:
     """A DuerOS level word as an index into ``count`` ordered speed steps."""
     scale = _fan_level_scale(level)
@@ -908,9 +939,7 @@ def _select_level_option(ctx: WriteContext, payload_key: str) -> str | None:
     valid option.
     """
     state = ctx.entities.get("value")
-    options = [
-        str(option) for option in ((state.attributes.get("options") or ()) if state is not None else ())
-    ]
+    options = _entity_values(state, "options")
     if not options:
         return None
     level = _fan_speed_level(ctx.payload)
@@ -1047,10 +1076,13 @@ def climate_fan_speed_mapping(
 
     def read(ctx: ReadContext) -> AttributeValue:
         state = ctx.entities.get("value")
-        index = _climate_fan_index(state, _climate_fan_levels(state))
-        # 0 is off the 1..10 request scale, so it reads back as "not on a
-        # discrete speed step" — which is what an automatic fan mode is.
-        return make_attribute(ATTR_FAN_SPEED, index if index is not None else 0, legal="[0, 10]")
+        levels = _climate_fan_levels(state)
+        index = _climate_fan_index(state, levels)
+        # Read back on the same 1..10 scale the write path spreads over the
+        # climate's own steps (an index would mean a different speed per
+        # device). 0 is off that scale, which is what an automatic fan mode is.
+        value = _fan_step_scale(index, len(levels)) if index is not None else 0
+        return make_attribute(ATTR_FAN_SPEED, value, legal="[0, 10]")
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
         state = ctx.entities.get("value")
@@ -1280,10 +1312,324 @@ def humidifier_mode_mapping(
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
 
+# --- contract enum <-> device vocabulary -------------------------------------
+#
+# Several capabilities are named by a *contract enum* while the entity behind
+# them speaks the integration's own vocabulary: SetGearRequest sends
+# MIN..MAX/AUTO for a 暖风档位 select labelled 弱暖/强暖/恒温, SetSuctionRequest
+# sends STANDARD/STRONG for a vacuum whose fan_speed_list is
+# Silent/Standard/Strong/Turbo, and attributes.md fixes the values the reported
+# attribute may carry. The helpers below translate both ways and return
+# ``None`` when nothing matches, so an unmappable request is answered with
+# NotSupportedInCurrentModeError instead of pushing an invalid option into HA
+# (and an unmappable reading is omitted instead of reported out of enum).
+
+def _entity_values(state: Any, attr: str) -> list[str]:
+    """A list-valued entity attribute as strings (``options`` / ``fan_speed_list``)."""
+    if state is None:
+        return []
+    raw = state.attributes.get(attr)
+    if raw is None:
+        return []
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Iterable):
+        return [str(raw)]
+    return [str(value) for value in raw]
+
+
+def _current_value(state: Any, attr: str | None) -> Any:
+    """The current value of a capability's entity.
+
+    ``attr`` names an attribute (a vacuum's ``fan_speed``). Without one the
+    value comes from a ``select``, whose current option Home Assistant exposes
+    as the entity *state* — the ``option`` attribute is not part of a real
+    select entity, so reading only the attribute yields an empty value on every
+    device (it is still honoured first for states that carry it).
+    """
+    if state is None:
+        return None
+    if attr:
+        return state.attributes.get(attr)
+    if "option" in state.attributes:
+        return state.attributes.get("option")
+    return getattr(state, "state", "")
+
+
+def _contract_token(value: Any, tokens: tuple[str, ...]) -> str | None:
+    """``value`` as one of ``tokens`` (case-insensitive), else ``None``."""
+    folded = str(value or "").strip().casefold()
+    if not folded:
+        return None
+    return next((token for token in tokens if token.casefold() == folded), None)
+
+
+def _alias_hit(token: str, candidates: list[str], aliases: Mapping[str, tuple[str, ...]]) -> str | None:
+    """The candidate whose label contains one of the token's aliases."""
+    wanted = next(
+        (values for key, values in aliases.items() if key.casefold() == token.casefold()),
+        (),
+    )
+    for alias in wanted:
+        folded = alias.casefold()
+        hit = next((c for c in candidates if folded in c.casefold()), None)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _value_token(value: Any, tokens: tuple[str, ...], aliases: Mapping[str, tuple[str, ...]]) -> str | None:
+    """A device value as its contract token (exact token, then aliases).
+
+    The *longest* matching alias wins: aliases are generic words (WORKING owns
+    "烘干"), so a more specific one ("烘干完成" under DONE) must not be shadowed
+    by whichever token happens to sit earlier in the table. Equal-length
+    keywords fall back to table order.
+    """
+    token = _contract_token(value, tokens)
+    if token is not None:
+        return token
+    folded = str(value or "").strip().casefold()
+    if not folded:
+        return None
+    best: tuple[int, int, str] | None = None
+    for order, (key, wanted) in enumerate(aliases.items()):
+        canonical = _contract_token(key, tokens)
+        if canonical is None:
+            # A write-only key (a gear position, say) is not a reportable token.
+            continue
+        for alias in wanted:
+            hit = alias.casefold()
+            if hit and hit in folded and (best is None or (len(hit), -order) > best[:2]):
+                best = (len(hit), -order, canonical)
+    return best[2] if best is not None else None
+
+
+def _scaled_index(token: str, tokens: tuple[str, ...], count: int) -> int | None:
+    """``token``'s index over ``count`` candidates, via its position in ``tokens``.
+
+    Used for the ordered vocabularies (a 档位 / 水位 scale): the token names a
+    *position* on the contract's scale, which is spread over the entity's own
+    ordered values — the same rule the fan-speed path uses.
+    """
+    index = next(
+        (i for i, t in enumerate(tokens) if t.casefold() == str(token).strip().casefold()),
+        None,
+    )
+    if index is None or count <= 0 or len(tokens) < 2:
+        return None
+    return round(index / (len(tokens) - 1) * (count - 1))
+
+
+def enum_value_mapping(
+    *,
+    entity_id: str,
+    attribute_name: str,
+    capability_key: str,
+    appliance_types: tuple[str, ...],
+    tokens: tuple[str, ...],
+    write_tokens: tuple[str, ...] | None = None,
+    set_action: str = "",
+    payload_key: str = "",
+    domain: str = "select",
+    service: str = "select_option",
+    data_key: str = "option",
+    options_attr: str = "options",
+    read_attr: str | None = None,
+    ordered: bool = False,
+    allow_custom: bool = False,
+    aliases: Mapping[str, tuple[str, ...]] | None = None,
+) -> CapabilityMapping:
+    """A capability whose values are a contract enum, written as a service value.
+
+    ``tokens`` is the *attribute* vocabulary (what DuerOS sees in
+    ``legalValue``); ``write_tokens`` the optional *request* vocabulary when the
+    action names values differently (``setGear`` sends the MIN..MAX gear scale
+    while the attribute is LOW/MIDDLE/HIGH). ``options_attr`` / ``read_attr``
+    point at the candidate list and the current value on the entity (a select's
+    ``options`` / ``option`` by default, a vacuum's ``fan_speed_list`` /
+    ``fan_speed``). ``ordered`` marks a scale vocabulary, where a token that
+    matches no alias is resolved by position; ``aliases`` maps a contract token
+    to the device labels it may appear as.
+
+    ``allow_custom`` opens the enum up in both directions for a vocabulary the
+    contract itself leaves device-defined (``mode``'s ``customName``): a value
+    that matches one of the entity's own candidates is reported (and accepted)
+    verbatim, with the entity's candidates as ``legalValue``, instead of being
+    dropped as out-of-enum.
+    """
+    alias_map: Mapping[str, tuple[str, ...]] = aliases or {}
+    request_tokens = write_tokens or tokens
+    payload_key = payload_key or capability_key
+    cap = DuerCapability(
+        capability_key,
+        "档位",
+        kind=CAP_KIND_CONTROL,
+        appliance_types=appliance_types,
+        attributes=(
+            DuerAttribute(
+                attribute_name,
+                "string",
+                legal="(" + ", ".join(tokens) + ")",
+            ),
+        ),
+        actions=(DuerAction(set_action, capability_key, payload_key),) if set_action else (),
+    )
+    def read(ctx: ReadContext) -> AttributeValue | None:
+        state = ctx.entities.get("value")
+        value = _current_value(state, read_attr)
+        candidates = _entity_values(state, options_attr)
+        token = _value_token(value, tokens, alias_map)
+        if token is None and ordered:
+            text = str(value or "")
+            index = candidates.index(text) if text in candidates else None
+            # A scale needs at least two steps to have a position at all.
+            if index is not None and len(candidates) >= 2:
+                token = tokens[round(index / (len(candidates) - 1) * (len(tokens) - 1))]
+        if token is None:
+            # A custom mode name the contract leaves to the vendor (mode 属性的
+            # customName) is reported verbatim; anything else unmappable is
+            # omitted rather than reported outside legalValue.
+            text = str(value or "").strip()
+            if not (allow_custom and text and text in candidates):
+                return None
+            return make_attribute(
+                attribute_name,
+                text,
+                legal="(" + ", ".join(candidates) + ")" if candidates else "",
+            )
+        return make_attribute(attribute_name, token, legal="(" + ", ".join(tokens) + ")")
+
+    def write(ctx: WriteContext) -> list[ServiceCall] | None:
+        if not set_action or ctx.action.name != set_action:
+            return None
+        raw = _payload_value(ctx.payload, payload_key)
+        text = str(raw).strip() if raw is not None else ""
+        if not text:
+            return None
+        candidates = _entity_values(ctx.entities.get("value"), options_attr)
+        # A value the entity itself lists is honored as-is (a custom mode name
+        # DuerOS echoes back); everything else has to be a contract token, so a
+        # missing payload or a token outside the request vocabulary (the gear
+        # scale's AUTO/RANDOM, say) is answered as unsupported instead of being
+        # pushed into the entity as if it were a valid label.
+        value = _contract_token(text, candidates) if allow_custom else None
+        token = _contract_token(text, request_tokens)
+        if value is None and token is not None:
+            value = _contract_token(token, candidates) or _alias_hit(token, candidates, alias_map)
+            if value is None and ordered and len(candidates) >= 2:
+                index = _scaled_index(token, request_tokens, len(candidates))
+                if index is not None:
+                    value = candidates[max(0, min(len(candidates) - 1, index))]
+        if value is None:
+            return None
+        return [ServiceCall(domain, service, {data_key: value}, entity_id)]
+
+    return CapabilityMapping(
+        cap, (EntityBinding(entity_id, "value"),), read=read, write=write
+    )
+
+
+def sensor_enum_mapping(
+    *,
+    entity_id: str,
+    attribute_name: str,
+    capability_key: str,
+    appliance_types: tuple[str, ...],
+    tokens: tuple[str, ...],
+    aliases: Mapping[str, tuple[str, ...]] | None = None,
+    query_names: tuple[str, ...] = (),
+) -> CapabilityMapping:
+    """A read-only attribute whose value is a contract enum (``workState``).
+
+    ``sensor_query_mapping`` is numeric-only (it drops a non-numeric state), so
+    a string-valued enum reading needs its own path; an unmappable value is
+    omitted rather than reported outside ``legalValue``.
+    """
+    alias_map: Mapping[str, tuple[str, ...]] = aliases or {}
+    legal = "(" + ", ".join(tokens) + ")"
+    cap = DuerCapability(
+        capability_key,
+        "查询",
+        kind=CAP_KIND_QUERY,
+        appliance_types=appliance_types,
+        attributes=(DuerAttribute(attribute_name, "string", legal=legal),),
+        actions=tuple(DuerAction(_query_action_name(q), capability_key) for q in query_names),
+        query_names=query_names,
+    )
+
+    def read(ctx: ReadContext) -> AttributeValue | None:
+        state = ctx.entities.get("value")
+        token = _value_token(state.state if state is not None else None, tokens, alias_map)
+        if token is None:
+            return None
+        return make_attribute(attribute_name, token, legal=legal)
+
+    return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read)
+
+
+# A remaining-time entity reports whatever unit the integration chose; the
+# contract's GetTimeLeftResponse is seconds.
+_TIME_UNIT_SECONDS = {
+    "h": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "hour": 3600,
+    "hours": 3600,
+    "min": 60,
+    "mins": 60,
+    "m": 60,
+    "minute": 60,
+    "minutes": 60,
+    "s": 1,
+    "sec": 1,
+    "secs": 1,
+    "second": 1,
+    "seconds": 1,
+}
+
+
+def time_left_mapping(
+    *,
+    entity_id: str,
+    appliance_types: tuple[str, ...],
+    attribute_name: str = ATTR_TIME_LEFT_IN_SECONDS,
+    query_names: tuple[str, ...] = ("GetTimeLeftRequest",),
+) -> CapabilityMapping:
+    """Remaining run time as ``timeLeftInSeconds`` (``getTimeLeft``).
+
+    The attribute name and the unit both come from the contract
+    (``GetTimeLeftResponse.timeLeftInSeconds``, int, seconds) — there is no
+    ``timeLeft`` attribute in attributes.md.
+    """
+    cap = DuerCapability(
+        "timeLeft",
+        "剩余时间",
+        kind=CAP_KIND_QUERY,
+        appliance_types=appliance_types,
+        attributes=(DuerAttribute(attribute_name, "number", legal="DOUBLE"),),
+        actions=tuple(DuerAction(_query_action_name(q), "timeLeft") for q in query_names),
+        query_names=query_names,
+    )
+
+    def read(ctx: ReadContext) -> AttributeValue | None:
+        state = ctx.entities.get("value")
+        value = _num(state.state if state is not None else None)
+        if value is None:
+            return None
+        unit = str((state.attributes or {}).get("unit_of_measurement", "")).strip().lower()
+        return make_attribute(
+            attribute_name, round(value * _TIME_UNIT_SECONDS.get(unit, 1)), legal="DOUBLE"
+        )
+
+    return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read)
+
+
 __all__ = [
     "power_mapping",
     "mode_switches_mapping",
     "select_mapping",
+    "enum_value_mapping",
+    "sensor_enum_mapping",
+    "time_left_mapping",
     "target_temperature_mapping",
     "percentage_mapping",
     "pause_mapping",
@@ -1304,57 +1650,3 @@ __all__ = [
     "target_humidity_mapping",
     "humidifier_mode_mapping",
 ]
-
-
-
-def attribute_level_mapping(
-    *,
-    entity_id: str,
-    attribute_name: str,
-    capability_key: str,
-    appliance_types: tuple[str, ...],
-    set_action: str,
-    service_domain: str,
-    service: str,
-    data_key: str,
-    payload_key: str,
-    read_attr: str | None = None,
-    read_state: bool = False,
-    unit: str = "",
-    legal: str = "",
-    query_names: tuple[str, ...] = (),
-) -> CapabilityMapping:
-    """A scalar level (suction / water level / mode) written via a service call.
-
-    Reads from ``state.attributes[read_attr]`` (or ``state.state`` when
-    ``read_state``), writes ``set_action`` to ``service_domain.service`` with
-    ``{data_key: payload_value}``.
-    """
-    cap = DuerCapability(
-        capability_key,
-        "档位",
-        kind=CAP_KIND_CONTROL,
-        appliance_types=appliance_types,
-        attributes=(DuerAttribute(attribute_name, "string", unit=unit, legal=legal),),
-        actions=(DuerAction(set_action, capability_key, payload_key),),
-    )
-
-    def read(ctx: ReadContext) -> AttributeValue:
-        state = ctx.entities.get("value")
-        if read_state:
-            value = state.state if state is not None else ""
-        else:
-            value = (state.attributes.get(read_attr) if state is not None and read_attr else None) or ""
-        return make_attribute(attribute_name, value, scale=unit, legal=legal)
-
-    def write(ctx: WriteContext) -> list[ServiceCall] | None:
-        if ctx.action.name != set_action:
-            return None
-        value = _payload_value(ctx.payload, payload_key)
-        if value is None:
-            return None
-        return [ServiceCall(service_domain, service, {data_key: str(value)}, entity_id)]
-
-    return CapabilityMapping(
-        cap, (EntityBinding(entity_id, "value"),), read=read, write=write
-    )

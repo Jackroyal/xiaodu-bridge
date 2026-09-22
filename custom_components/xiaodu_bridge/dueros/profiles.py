@@ -15,24 +15,22 @@ from __future__ import annotations
 from typing import Any
 
 from .composers import (
-    attribute_level_mapping,
     composite_power_mapping,
+    enum_value_mapping,
     mode_switches_mapping,
     pause_mapping,
     percentage_mapping,
     power_mapping,
     select_mapping,
+    sensor_enum_mapping,
     sensor_query_mapping,
     target_temperature_mapping,
+    time_left_mapping,
 )
 from .constants import (
-    ATTR_ELECTRICITY_CAPACITY,
-    ATTR_FAN_SPEED,
-    ATTR_MODE,
-    ATTR_SUCTION,
-    ATTR_WARMTH_LEVEL,
-    ATTR_WATER_LEVEL,
-    ATTR_WORK_STATE,
+    ACTION_SET_GEAR,
+    ACTION_SET_FAN_SPEED,
+    ACTION_SET_MODE,
     ACTION_SET_SUCTION,
     ACTION_SET_WATER_LEVEL,
     ACTION_START_UP,
@@ -41,6 +39,19 @@ from .constants import (
     APPLIANCE_CLOTHES_RACK,
     APPLIANCE_SWEEPING_ROBOT,
     APPLIANCE_WASHING_MACHINE,
+    ATTR_ELECTRICITY_CAPACITY,
+    ATTR_FAN_SPEED,
+    ATTR_MODE,
+    ATTR_SUCTION,
+    ATTR_WARMTH_LEVEL,
+    ATTR_WATER_LEVEL,
+    ATTR_WORK_STATE,
+    GEAR_VALUES,
+    SUCTION_VALUES,
+    WARMTH_LEVEL_VALUES,
+    WASHING_MODE_VALUES,
+    WATER_LEVEL_VALUES,
+    WORK_STATE_VALUES,
 )
 from .model import DeviceBuildContext, DuerDevice, DuerDeviceProfile, make_device_id
 
@@ -164,6 +175,61 @@ def _reachable(ctx: DeviceBuildContext, entity_ids: list[str]) -> bool:
     return False
 
 
+# --- 契约词表 ↔ 设备词表 -------------------------------------------------------
+# DuerOS 用契约枚举（attributes.md / control-message.md 的取值），集成侧用的是
+# 厂商自己的档位名/状态词。这里声明两者的对应，由 ``enum_value_mapping`` /
+# ``sensor_enum_mapping`` 双向解析；表里没有的取值不会被猜（请求回“不支持”，
+# 读取则不上报该属性）。设备换了措辞时改这里，不改 composer。
+
+# 浴霸暖风档位：setGear 说的是 MIN..MAX 位置，属性要求 LOW/MIDDLE/HIGH，
+# 而集成把档位命名为 弱暖 / 强暖 / 恒温。每个档位位置都要有明确落点——否则
+# 「有别名」的档位走别名、「没别名」的档位按位置猜，会出现中低档比中档更热
+# 这种不单调映射。（MIN..MAX 这些键只用于写侧，读侧只认 LOW/MIDDLE/HIGH。）
+WARMTH_LEVEL_ALIASES = {
+    "MIN": ("弱", "低"),
+    "LOW": ("弱", "低"),
+    "MIDDLE_LOW": ("弱", "低"),
+    "MIDDLE": ("恒温", "中"),
+    "MIDDLE_HIGH": ("强", "高"),
+    "HIGH": ("强", "高"),
+    "MAX": ("强", "高"),
+}
+
+# 扫地机吸力：契约只有 STANDARD / STRONG 两档，集成的 fan_speed_list 常有 4 档。
+SUCTION_ALIASES = {
+    "STANDARD": ("标准", "普通", "安静", "静音", "standard", "balanced", "normal", "silent", "quiet"),
+    "STRONG": ("强力", "强劲", "最大", "strong", "max", "turbo"),
+}
+
+# 洗衣机洗涤模式（模式表 WASHING_MACHINE：STANDARD/DRY/WASH_DRY/FAST_WASH/DOWN_JACKET）
+WASHING_MODE_ALIASES = {
+    "STANDARD": ("标准",),
+    "DRY": ("干洗",),
+    "WASH_DRY": ("洗烘",),
+    "FAST_WASH": ("快洗", "快速"),
+    "DOWN_JACKET": ("羽绒",),
+}
+
+# 洗衣机水位：契约 LOW / MEDIUM / HIGH，集成多为 低 / 中 / 高 水位
+WATER_LEVEL_ALIASES = {
+    "LOW": ("低",),
+    "MEDIUM": ("中",),
+    "HIGH": ("高",),
+}
+
+# 运行状态：契约取 STOP/START/PAUSE/WORKING/WORK_NEARLY_FINISHED/DONE。
+# 表内顺序即优先级：具体/终态词排在通用词前面（“烘干完成”里既有 DONE 的“完成”
+# 也有 WORKING 的“烘干”，同长时不看谁先遍历到、就看表里谁在前）。
+WORK_STATE_ALIASES = {
+    "WORK_NEARLY_FINISHED": ("即将完成", "即将结束", "nearly"),
+    "DONE": ("完成", "结束", "done", "finished"),
+    "PAUSE": ("暂停", "paused"),
+    "START": ("启动", "开始", "starting"),
+    "STOP": ("待机", "空闲", "停止", "idle", "standby", "stopped"),
+    "WORKING": ("运行", "工作", "洗涤", "漂洗", "脱水", "烘干", "running", "washing", "working"),
+}
+
+
 # --- profile auto-match (confident, used for the default path) -----------------
 
 def _matches_yuba(states: Any) -> bool:
@@ -268,12 +334,19 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
 
     if gear:
         mappings.append(
-            select_mapping(
+            enum_value_mapping(
                 entity_id=gear,
                 attribute_name=ATTR_WARMTH_LEVEL,
                 capability_key="warmthLevel",
                 appliance_types=appliance_types,
-                set_action="setGear",
+                tokens=WARMTH_LEVEL_VALUES,
+                # setGear 的载荷字段是 ``gear``（不是 warmthLevel），取值是
+                # MIN..MAX 的位置刻度；属性则要求 LOW/MIDDLE/HIGH。
+                write_tokens=GEAR_VALUES,
+                set_action=ACTION_SET_GEAR,
+                payload_key="gear",
+                ordered=True,
+                aliases=WARMTH_LEVEL_ALIASES,
             )
         )
     if fan:
@@ -283,7 +356,7 @@ def build_yuba(ctx: DeviceBuildContext) -> list[DuerDevice]:
                 attribute_name=ATTR_FAN_SPEED,
                 capability_key="fanSpeed",
                 appliance_types=appliance_types,
-                set_action="setFanSpeed",
+                set_action=ACTION_SET_FAN_SPEED,
                 ordered_options=True,
             )
         )
@@ -390,17 +463,20 @@ def build_sweeping_robot(ctx: DeviceBuildContext) -> list[DuerDevice]:
             power_predicate=_vacuum_on,
         ),
         pause_mapping(entity_id=robot, appliance_types=appliance_types, domain="vacuum"),
-        attribute_level_mapping(
+        enum_value_mapping(
             entity_id=robot,
             attribute_name=ATTR_SUCTION,
             capability_key="suction",
             appliance_types=appliance_types,
+            tokens=SUCTION_VALUES,
             set_action=ACTION_SET_SUCTION,
-            service_domain="vacuum",
+            domain="vacuum",
             service="set_fan_speed",
             data_key="fan_speed",
-            payload_key="suction",
+            options_attr="fan_speed_list",
             read_attr="fan_speed",
+            ordered=True,
+            aliases=SUCTION_ALIASES,
         ),
     ]
     if battery:
@@ -412,6 +488,9 @@ def build_sweeping_robot(ctx: DeviceBuildContext) -> list[DuerDevice]:
                 appliance_types=appliance_types,
                 unit="%",
                 legal="[0, 100]",
+                # 扫地机器人协议页把 getElectricityCapacity 列为该类型动作，
+                # 载荷是 attributes（electricityCapacity），与查询回退路径一致。
+                query_names=("GetElectricityCapacityRequest",),
             )
         )
 
@@ -536,24 +615,35 @@ def build_washing_machine(ctx: DeviceBuildContext) -> list[DuerDevice]:
         )
     if wash_mode:
         mappings.append(
-            select_mapping(
+            enum_value_mapping(
                 entity_id=wash_mode,
                 attribute_name=ATTR_MODE,
                 capability_key="mode",
                 appliance_types=appliance_types,
-                set_action="setMode",
-                select_domain="select",
+                tokens=WASHING_MODE_VALUES,
+                set_action=ACTION_SET_MODE,
+                domain="select",
+                service="select_option",
+                # 模式表只列了 5 个洗涤程序，但 attributes.md 的 mode 属性允许
+                # customName（厂商自定义模式）：认不出的程序名照原样上报/接受，
+                # 不再一律丢弃。
+                allow_custom=True,
+                aliases=WASHING_MODE_ALIASES,
             )
         )
     if water_level:
         mappings.append(
-            select_mapping(
+            enum_value_mapping(
                 entity_id=water_level,
                 attribute_name=ATTR_WATER_LEVEL,
                 capability_key="waterLevel",
                 appliance_types=appliance_types,
+                tokens=WATER_LEVEL_VALUES,
                 set_action=ACTION_SET_WATER_LEVEL,
-                select_domain="select",
+                domain="select",
+                service="select_option",
+                ordered=True,
+                aliases=WATER_LEVEL_ALIASES,
             )
         )
     if temp:
@@ -562,22 +652,18 @@ def build_washing_machine(ctx: DeviceBuildContext) -> list[DuerDevice]:
         )
     if run_state:
         mappings.append(
-            sensor_query_mapping(
+            sensor_enum_mapping(
                 entity_id=run_state,
                 attribute_name=ATTR_WORK_STATE,
                 capability_key="workState",
                 appliance_types=appliance_types,
+                tokens=WORK_STATE_VALUES,
+                aliases=WORK_STATE_ALIASES,
             )
         )
     if time_left:
         mappings.append(
-            sensor_query_mapping(
-                entity_id=time_left,
-                attribute_name="timeLeft",
-                capability_key="timeLeft",
-                appliance_types=appliance_types,
-                unit="min",
-            )
+            time_left_mapping(entity_id=time_left, appliance_types=appliance_types)
         )
 
     primary = power_entity or wash_mode

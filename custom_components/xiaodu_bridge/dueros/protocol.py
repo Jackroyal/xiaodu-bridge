@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from ..const import DATA_ENHANCED_DEVICES, DATA_STATE_REPORT_MANAGER, DATA_TIMER_MANAGER, DATA_VERSION, DOMAIN
 from .enhanced import EnhancedDeviceSet
-from .model import AttributeValue, DuerAction, ReadContext, WriteContext
+from .model import AttributeValue, DuerAction, ReadContext, WriteContext, make_attribute
 from .constants import (
     ACTION_TIMING_TURN_OFF,
     ACTION_TIMING_TURN_ON,
@@ -31,6 +31,7 @@ from .constants import (
     ERROR_OFFLINE,
     ERROR_SERVICE,
     ERROR_UNSUPPORTED,
+    MAX_ATTRIBUTES_PER_APPLIANCE,
     NAMESPACE_CONTROL,
     NAMESPACE_DISCOVERY,
     NAMESPACE_QUERY,
@@ -48,7 +49,13 @@ def _respond(header: dict[str, Any], name: str, payload: dict[str, Any]) -> dict
 def _error_response(header: dict[str, Any], error_name: str) -> dict[str, Any]:
     response_header = dict(header)
     response_header["name"] = error_name
-    return {"header": response_header, "payload": {}}
+    payload: dict[str, Any] = {}
+    if error_name == ERROR_UNSUPPORTED:
+        # NotSupportedInCurrentModeError declares errorInfo / currentDeviceMode
+        # as required payload fields (error-message.md); the skill does not
+        # model appliance modes here, so report the contract's "OTHER".
+        payload = {"errorInfo": {"currentDeviceMode": "OTHER"}}
+    return {"header": response_header, "payload": payload}
 
 
 def _strip_request(name: str) -> str:
@@ -97,15 +104,50 @@ def _enhanced_read_ctx(hass: Any, device: Any, mapping: Any) -> ReadContext:
 
 
 def _enhanced_attribute_values(hass: Any, device: Any, only_mapping: Any = None) -> list[dict[str, Any]]:
-    """Current attributes (serialized) for a DuerDevice, optionally one mapping."""
+    """Current attributes (serialized) for a DuerDevice, optionally one mapping.
+
+    Deduplicated by name and capped at the protocol's per-appliance maximum
+    (discovery-message.md / attributes-report.md both allow 10), with the
+    baseline attributes first — an appliance whose capabilities together
+    produce more than that must not send a list DuerOS truncates on its own.
+    """
     values: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(payload: dict[str, Any]) -> None:
+        name = str(payload.get("name", ""))
+        if not name or name in seen or len(values) >= MAX_ATTRIBUTES_PER_APPLIANCE:
+            return
+        seen.add(name)
+        values.append(payload)
+
+    if only_mapping is None:
+        for attr in _device_baseline_attributes(device):
+            _add(attr)
     for mapping in device.capabilities:
         if only_mapping is not None and mapping is not only_mapping:
             continue
         attr = mapping.read(_enhanced_read_ctx(hass, device, mapping))
         if attr is not None:
-            values.append(attr.to_dict())
+            _add(attr.to_dict())
     return values
+
+
+def _device_baseline_attributes(device: Any) -> list[dict[str, Any]]:
+    """The two attributes every appliance carries (attributes.md).
+
+    "每种设备都必须包含 name 属性和 connectivity 属性", and connectivity must
+    agree with the discovery ``isReachable`` flag — both are derived from the
+    device here so no capability can forget them.
+    """
+    return [
+        make_attribute("name", device.friendly_name, legal="STRING").to_dict(),
+        make_attribute(
+            "connectivity",
+            "REACHABLE" if device.is_reachable else "UNREACHABLE",
+            legal="(UNREACHABLE, REACHABLE)",
+        ).to_dict(),
+    ]
 
 
 def _enhanced_groups(enhanced: Any) -> list[dict[str, Any]]:
@@ -136,7 +178,7 @@ def _enhanced_discovery(hass: Any, enhanced: Any) -> list[dict[str, Any]]:
     app_version = hass.data.get(DOMAIN, {}).get(DATA_VERSION) or "0.0.0"
     appliances: list[dict[str, Any]] = []
     for device in enhanced.all():
-        attrs = _enhanced_attribute_values(hass, device)[:10]
+        attrs = _enhanced_attribute_values(hass, device)
         appliances.append(
             {
                 "applianceId": device.device_id,
@@ -214,6 +256,13 @@ def _enhanced_query(
     if device is None:
         return _error_response(header, ERROR_DEVICE_NOT_FOUND)
 
+    # An offline appliance answers a query with TargetOfflineError rather than
+    # "unsupported" — the reading is unsupported *because* the device is
+    # unreachable (the same check the control path makes).
+    state = hass.states.get(device.primary_entity_id)
+    if state is not None and state.state == "unavailable":
+        return _error_response(header, ERROR_OFFLINE)
+
     query_name = str(header.get("name", ""))
     mapping = device.find_query_capability(query_name)
     if mapping is None:
@@ -244,6 +293,20 @@ def _enhanced_query(
                 "temperatureReading": {"value": temp.value, "scale": temp.scale},
                 "applianceResponseTimestamp": "",
             },
+        )
+
+    if query_name == "GetTimeLeftRequest":
+        # GetTimeLeftResponse carries a plain field, not an attribute list
+        # (query-message.md): ``timeLeftInSeconds.value``, int, seconds.
+        attr = result if isinstance(result, AttributeValue) else next(
+            (a for a in result if getattr(a, "name", "") == "timeLeftInSeconds"), None
+        )
+        if attr is None:
+            return _error_response(header, ERROR_UNSUPPORTED)
+        return _respond(
+            header,
+            _response_name(query_name),
+            {"timeLeftInSeconds": {"value": int(_to_float(attr.value) or 0)}},
         )
 
     if isinstance(result, AttributeValue):
