@@ -18,7 +18,7 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.12**。
+当前集成版本：**v0.9.13**。
 
 ## 功能
 
@@ -51,10 +51,6 @@
 4. 搜索 **xiaodu bridge**，或先添加本仓库为 Custom Repository：
    `https://github.com/Jackroyal/xiaodu-bridge`，类别选择 **Integration**。
 5. 下载后重启 Home Assistant。
-
-> 小度为限定地区的平台，`hacs.json` 中已设置 `country: CN`：只有 HACS 的
-> 国家/地区设置为 **China** 或 **All** 时才会显示本仓库。若未看到，可在
-> **HACS → Settings → Country** 改为 **All**，或直接使用下面的手动安装方式。
 
 ### 手动安装
 

@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.12**.
+Current version: **v0.9.13**.
 
 ## Features
 
@@ -73,11 +73,6 @@ Current version: **v0.9.12**.
 4. Search for **xiaodu bridge**, or add this repository as a Custom Repository first:
    `https://github.com/Jackroyal/xiaodu-bridge`, category **Integration**.
 5. Restart Home Assistant after downloading.
-
-> Xiaodu is a region-limited platform, and `hacs.json` sets `country: CN`: this
-> repository only appears when HACS's country/region is set to **China** or **All**. If
-> you don't see it, change **HACS → Settings → Country** to **All**, or use the manual
-> installation below.
 
 ### Manual installation
 

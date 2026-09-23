@@ -22,6 +22,7 @@ carried the fresh attributes back to DuerOS.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -55,6 +56,11 @@ CONTROL_SUPPRESS_SECONDS = 3.0
 # ("One attribute can only sync 1 times during 60"). Keep a small margin so
 # server-side clock differences do not cause a rejection.
 ATTR_SYNC_COOLDOWN_SECONDS = 62.0
+
+# A push DuerOS refused (rate limit / "stop sync") is retried once after this
+# delay: long enough to clear the documented 60-second per-attribute window,
+# close enough that a refusal caused by a post-restart burst is not missed.
+REFUSAL_RETRY_SECONDS = 65.0
 
 def build_change_report(
     bot_id: str,
@@ -148,11 +154,71 @@ async def report_changed_attribute(
                     attribute_name,
                     open_uid,
                 )
-                if response.status == 200 and "can only sync" not in str(msg):
+                if not _is_acknowledged(msg):
+                    # DuerOS sometimes answers a ChangeReport with something
+                    # other than its "update N attributes" acknowledgement —
+                    # e.g. "Cloud response name is not ReportStateResponse,
+                    # stop sync" (status 21096, updated_attribute_num 0), where
+                    # the sync was refused. Only the full body says why, so
+                    # keep it.
+                    _LOGGER.warning(
+                        "Xiaodu state report -> 云端未确认同步 appliance=%s attr=%s "
+                        "status=%s body=%s",
+                        appliance_id,
+                        attribute_name,
+                        response.status,
+                        _format_body(body),
+                    )
+                if _sync_applied(response.status, body):
                     accepted = True
         except Exception:  # noqa: BLE001 - a failed push must not break the flow
             _LOGGER.warning("Xiaodu state report failed: %s", payload, exc_info=True)
     return accepted
+
+
+def _sync_applied(status: Any, body: Any) -> bool:
+    """Did DuerOS actually apply this ChangeReport?
+
+    HTTP 200 alone does not mean the sync happened — DuerOS also answers 200
+    when it refuses: the documented per-attribute rate limit ("... can only
+    sync ...") and the restart-burst refusal (status 21096, "Cloud response
+    name is not ReportStateResponse, stop sync", whose body reports
+    ``data.updated_attribute_num == 0``). Only a reply that reports an update
+    counts, because the caller records a 62-second per-attribute cooldown for
+    accepted pushes only: a refused attribute stays out of that cooldown and is
+    re-sent on its next change instead of waiting out a sync that never landed.
+    """
+    if status != 200 or not isinstance(body, dict):
+        return False
+    text = str(body.get("msg") or "").strip()
+    if "can only sync" in text:
+        return False
+    data = body.get("data")
+    updated = data.get("updated_attribute_num") if isinstance(data, dict) else None
+    if isinstance(updated, int):
+        return updated > 0
+    return text.startswith("update")
+
+
+def _is_acknowledged(msg: Any) -> bool:
+    """Is this the cloud's usual ChangeReport acknowledgement?
+
+    Known-good replies are the per-attribute update count ("update N
+    attributes"), an empty body (older responses), and the documented
+    per-attribute rate limit ("... can only sync ..."), which the caller
+    handles by not counting the push as accepted.
+    """
+    text = str(msg or "").strip()
+    return not text or text.startswith("update") or "can only sync" in text
+
+
+def _format_body(body: Any) -> str:
+    """One-line, length-capped rendering of a cloud response body for logs."""
+    try:
+        text = json.dumps(body, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = str(body)
+    return text[:600]
 
 class StateReportManager:
     """Listen for exposed-device state changes and push changereports.
@@ -190,6 +256,8 @@ class StateReportManager:
         self._confirmed: dict[str, float] = {}
         # (appliance id, attribute name) -> monotonic time of the last accepted push
         self._last_sync: dict[tuple[str, str], float] = {}
+        # (appliance id, attribute) -> its one delayed retry was already used
+        self._retry_used: set[tuple[str, str]] = set()
 
     def _build_devices(self) -> None:
         """Rebuild the semantic device set from the current entry options."""
@@ -304,12 +372,17 @@ class StateReportManager:
     def _rebuild_index(self, *, reset_cooldowns: bool) -> None:
         """Rebuild the entity index and attribute snapshots."""
         if reset_cooldowns:
-            for handle in self._handles.values():
-                handle()  # async_call_later returns a callable cancel handle
-            self._handles.clear()
-            self._pending.clear()
+            # A rebuild (startup, options update) invalidates the cooldown and
+            # confirmation state, but *not* the in-flight reports: a pending
+            # report is an unsynced change, and the post-startup burst is
+            # exactly where the cloud refuses pushes. Dropping the timers here
+            # (and with them a scheduled retry) would leave those attributes
+            # unsynced until they change again, so the handles and the pending
+            # set are left alone — a flush for an appliance that no longer
+            # exists is refused by the cloud and then dropped.
             self._confirmed.clear()
             self._last_sync.clear()
+            self._retry_used.clear()
 
         index: dict[str, set[str]] = {}
         for dev_id, dev in self._devices.items():
@@ -376,6 +449,7 @@ class StateReportManager:
         self._pending.clear()
         self._confirmed.clear()
         self._last_sync.clear()
+        self._retry_used.clear()
         self._index.clear()
         self._devices.clear()
         self._snapshots.clear()
@@ -443,6 +517,11 @@ class StateReportManager:
         )
 
     def _schedule_report(self, device_id: str, names: set[str]) -> None:
+        # A real state change of an attribute grants it a fresh delayed retry
+        # budget (see _take_retry): the refusal that consumed the previous
+        # retry may well be stale by now.
+        for name in names:
+            self._retry_used.discard((device_id, name))
         pending = self._pending.setdefault(device_id, set())
         pending |= names
         if device_id in self._handles:
@@ -473,7 +552,6 @@ class StateReportManager:
             return
 
         from .oauth_server import _get_store  # noqa: PLC0415
-        from homeassistant.helpers.event import async_call_later  # noqa: PLC0415
 
         store = await _get_store(self.hass)
         bot_id = str((self.entry.data or {}).get(CONF_BOT_ID, "") or "").strip()
@@ -498,24 +576,63 @@ class StateReportManager:
 
         if held:
             self._pending[device_id] = {name for name, _ in held}
-            min_remaining = min(remaining for _, remaining in held)
             _LOGGER.debug(
                 "Holding attrs for %s until DuerOS cooldown expires: %s "
                 "(retry in %.1fs)",
                 device_id,
                 sorted(name for name, _ in held),
-                min_remaining,
-            )
-            self._handles[device_id] = async_call_later(
-                self.hass,
-                min_remaining,
-                partial(self._async_flush, device_id),
+                min(remaining for _, remaining in held),
             )
 
+        # A refused push (rate limit / "stop sync") gets one delayed retry: the
+        # documented per-attribute window is 60 seconds, and a refusal caused by
+        # the post-restart burst is usually gone by the time it elapses. Both
+        # reasons to flush again are folded into a single timer so the device
+        # never ends up with two competing handles.
+        next_flush: float | None = min((remaining for _, remaining in held), default=None)
+        refused: list[str] = []
         for attribute_name in ready:
             accepted = await report_changed_attribute(
                 self.hass, self.entry, store, device_id, attribute_name
             )
             if accepted:
                 self._last_sync[(device_id, attribute_name)] = time.monotonic()
+                self._retry_used.discard((device_id, attribute_name))
+                continue
+            if not self._take_retry(device_id, attribute_name):
+                continue
+            refused.append(attribute_name)
+            self._pending.setdefault(device_id, set()).add(attribute_name)
+            next_flush = (
+                REFUSAL_RETRY_SECONDS
+                if next_flush is None
+                else min(next_flush, REFUSAL_RETRY_SECONDS)
+            )
+
+        if refused:
+            _LOGGER.debug(
+                "Retrying refused attrs for %s in %.1fs: %s",
+                device_id,
+                REFUSAL_RETRY_SECONDS,
+                sorted(refused),
+            )
+        if next_flush is not None and self._pending.get(device_id):
+            from homeassistant.helpers.event import async_call_later  # noqa: PLC0415
+
+            self._handles[device_id] = async_call_later(
+                self.hass, next_flush, partial(self._async_flush, device_id)
+            )
+
+    def _take_retry(self, device_id: str, attribute_name: str) -> bool:
+        """Claim the one delayed retry allowed per refused push.
+
+        Every real state change re-grants it (see ``_schedule_report``), so a
+        cloud that keeps refusing cannot turn this into a retry loop: after its
+        single retry the attribute simply waits for its next change.
+        """
+        key = (device_id, attribute_name)
+        if key in self._retry_used:
+            return False
+        self._retry_used.add(key)
+        return True
 
