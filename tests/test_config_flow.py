@@ -179,3 +179,59 @@ async def test_options_simple_flow_saves_object_schema(hass) -> None:
     # A power-only switch selected with every capability checked normalizes to
     # default-all (``caps: []``, dynamic) instead of a pinned explicit list.
     assert devices_cfg[device.id]["caps"] == []
+
+
+async def test_options_flow_offers_height_capability(hass) -> None:
+    """A clothes-rack device offers the 「升降」 capability in the picker."""
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.xiaodu_bridge.const import (
+        CONF_CAPABILITIES,
+        CONF_DEVICES,
+        CONF_SYNC_AREAS,
+    )
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={CONF_DEVICES: {}, CONF_SYNC_AREAS: False},
+    )
+    entry.add_to_hass(hass)
+
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "rack")},
+        name="阳台晾衣架",
+    )
+    er.async_get(hass).async_get_or_create(
+        "cover", "test", "rack_cover", suggested_object_id="airer", device_id=device.id
+    )
+    hass.states.async_set("cover.airer", "closed")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICES: [device.id], CONF_SYNC_AREAS: False}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "devices"}
+    )
+    step_id = next(k for k in result["menu_options"] if k.startswith("dev_"))
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": step_id}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "edit_device"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    field = next(
+        value
+        for key, value in result["data_schema"].schema.items()
+        if str(key) == CONF_CAPABILITIES
+    )
+    labels = [option["label"] for option in field.config["options"]]
+    assert "升降" in labels

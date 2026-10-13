@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from .. import devices as device_mod
@@ -694,6 +695,61 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def device_keys_for_profile(
+    hass: Any, profile_key: str, options: Mapping[str, Any] | None = None
+) -> set[str]:
+    """Device keys whose rebuilt semantic set exposes ``profile_key``.
+
+    Registry-aware glue mirroring :func:`build_candidate_devices`, but keyed by
+    the *profile* rather than the capability union, so a caller (config-entry
+    migration) can target a device by its semantic shape instead of guessing
+    from the stored capability list. States come from the live state machine
+    plus, for registered entities not loaded yet, synthesized stand-ins from the
+    entity registry — config-entry setup order must not decide detection.
+    """
+    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    ent_reg = er.async_get(hass)
+    device_reg = dr.async_get(hass)
+
+    def device_of(entity_id: str) -> str | None:
+        row = ent_reg.async_get(entity_id)
+        return row.device_id if row and row.device_id else None
+
+    def stable_id_of(entity_id: str) -> str | None:
+        row = ent_reg.async_get(entity_id)
+        return row.unique_id if row and row.unique_id else None
+
+    def name_of(device_key: str) -> str | None:
+        device = device_reg.async_get(device_key)
+        return (device.name_by_user or device.name) if device else None
+
+    states: dict[str, Any] = {s.entity_id: s for s in hass.states.async_all()}
+    for row in ent_reg.entities.values():
+        if row.disabled_by is not None or row.entity_id in states:
+            continue
+        states[row.entity_id] = SimpleNamespace(
+            entity_id=row.entity_id,
+            domain=row.entity_id.split(".", 1)[0],
+            state="",
+            attributes={"friendly_name": row.name or row.original_name or ""},
+        )
+
+    enhanced = build_enhanced_device_set(
+        list(states.values()),
+        dict(options or {}),
+        device_of=device_of,
+        name_of=name_of,
+        stable_id_of=stable_id_of,
+    )
+    keys: set[str] = set()
+    for dev in enhanced.all():
+        if dev.profile_key == profile_key:
+            keys.add(device_of(dev.primary_entity_id) or dev.primary_entity_id)
+    return keys
 
 
 def build_device_detail(hass: Any, device_key: str, obj: Any = None) -> dict[str, Any]:

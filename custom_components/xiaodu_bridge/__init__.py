@@ -36,6 +36,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
 from .const import (
+    CONF_DEVICES,
     DATA_ENHANCED_DEVICES,
     DATA_STATE_REPORT_MANAGER,
     DATA_STRUCTURE_REFRESH_HANDLE,
@@ -80,6 +81,51 @@ def _get_entry(hass: HomeAssistant) -> ConfigEntry | None:
     """Return the single Xiaodu hub entry, if configured."""
     entries = hass.config_entries.async_entries(DOMAIN)
     return entries[0] if entries else None
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate a pre-v2 entry's stored per-device capabilities.
+
+    v2 reworks the CLOTHES_RACK legend: ``turnOn`` / ``turnOff`` drive the rack
+    light and the height actions (``incrementHeight`` / ``decrementHeight``)
+    drive the cover, so the old ``percentage`` capability no longer exists.
+    A rack whose stored ``caps`` were narrowed to a subset must therefore drop
+    ``percentage`` and gain ``height``; otherwise the narrowing keeps the new
+    ``height`` capability off. Racks are identified through the rebuilt
+    *semantic* set (``profile_key``), never by guessing from ``caps`` content;
+    a config with no rack, or a default-all device, only has its version bumped.
+    """
+    if entry.version >= 2:
+        return True
+
+    from .dueros.enhanced import device_keys_for_profile  # noqa: PLC0415
+
+    options = dict(entry.options)
+    raw = options.get(CONF_DEVICES)
+    if isinstance(raw, dict) and raw:
+        rack_keys = device_keys_for_profile(hass, "CLOTHES_RACK", options)
+        devices = dict(raw)
+        changed = False
+        for key in rack_keys:
+            # Only rewrite the rack entries; every other device is copied
+            # through untouched (a legacy / default-all value is left as-is).
+            obj = devices.get(key)
+            if not isinstance(obj, dict):
+                continue
+            caps = obj.get("caps")
+            if not isinstance(caps, (list, tuple)) or not caps:
+                # Default-all (dynamic) already follows the new legend.
+                continue
+            new_caps = [cap for cap in caps if cap != "percentage"]
+            if "height" not in new_caps:
+                new_caps.append("height")
+            devices[key] = {**obj, "caps": new_caps}
+            changed = True
+        if changed:
+            options[CONF_DEVICES] = devices
+
+    hass.config_entries.async_update_entry(entry, options=options, version=2)
+    return True
 
 
 # Registry / entity add-remove events coalesce into one device-set refresh

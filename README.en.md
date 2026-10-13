@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.13**.
+Current version: **v0.9.14**.
 
 ## Features
 
@@ -67,12 +67,18 @@ Current version: **v0.9.13**.
 
 ### HACS (recommended)
 
+`xiaodu bridge` is not yet in the HACS default store, so add it as a custom repository
+first:
+
 1. Make sure [HACS](https://hacs.xyz) is installed.
-2. Open **HACS → Integrations**.
-3. Select **Explore & Download Repositories**.
-4. Search for **xiaodu bridge**, or add this repository as a Custom Repository first:
-   `https://github.com/Jackroyal/xiaodu-bridge`, category **Integration**.
-5. Restart Home Assistant after downloading.
+2. Open **HACS → Integrations**, click `⋮` (top right) → **Custom repositories**,
+   enter `https://github.com/Jackroyal/xiaodu-bridge` and pick category **Integration**.
+3. Back in **HACS → Integrations**, search for **xiaodu bridge** and download it.
+4. Restart Home Assistant.
+
+Downloading via HACS only puts the files in place. After the restart, go to
+**Settings → Devices & Services → Add Integration**, search for **xiaodu bridge** and add
+it — that is where the OAuth information is entered (see "Configuration" below).
 
 ### Manual installation
 
@@ -146,14 +152,16 @@ or more DuerOS appliances:
 | Device | DuerOS type | Synthesized capabilities |
 |---|---|---|
 | Bathroom heater (yuba) | `YUBA` | Power (heating / blow / ventilation), mode (`HEAT` / `FAN` / `VENTILATION`), warmth level, fan speed, target temperature |
-| Clothes airer | `CLOTHES_RACK` | Power (up / down), position, pause, mode (`DRYING` / `DISINFECT`) |
+| Clothes airer | `CLOTHES_RACK` | Raise/lower (incrementHeight/decrementHeight), pause, light (turnOn/turnOff), mode (`DRYING` / `DISINFECT`) |
 | Robot vacuum | `SWEEPING_ROBOT` | Power, pause, suction, battery level |
 | Washing machine | `WASHING_MACHINE` | Power (on / off / start), wash program, water level, target temperature, run state, time left |
 
-The light on a bathroom heater or clothes airer is not merged into the composite device
-(DuerOS has no corresponding action); it is split into a separate `LIGHT` device, with
-brightness / color temperature / color exposed according to the entity's actual
-capabilities.
+The clothes airer's light is merged into `CLOTHES_RACK` (`turnOn` / `turnOff` are the
+lighting, matching the App's wording) instead of being split into a separate `LIGHT`
+appliance; a model without a light entity falls back to mapping power onto the rack's
+raise/lower. The bathroom heater's light has no DuerOS action and is still split into a
+separate `LIGHT` device, with brightness / color temperature / color exposed according
+to the entity's actual capabilities.
 
 **Generic capability synthesis** — mapped by HA entity domain:
 
@@ -189,6 +197,7 @@ capabilities.
 | `targetHumidity` | Target humidity | Control | `targetHumidity` |
 | `mode` | Mode | Control | `mode` |
 | `percentage` | Position | Control | `percentage` |
+| `height` | Raise/lower | Control | — (`incrementHeight` / `decrementHeight`, no attribute) |
 | `suction` | Suction | Control | `suction` |
 | `waterLevel` | Water level | Control | `waterLevel` |
 | `pause` | Pause | Control | `pauseState` |
@@ -226,8 +235,8 @@ level / fan gear report the actual current level instead of an empty value.
 
 ## Configuring devices and capabilities
 
-After adding the integration, open the integration entry and select **设备与能力**
-(Devices & capabilities):
+After adding the integration, open the integration entry → **Configure** and go to the
+**Xiaodu hub** page:
 
 1. The hub menu provides the device list, add / remove device, and save & finish.
 2. The device list shows "room · device name"; newly added devices expose all available

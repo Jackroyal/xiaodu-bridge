@@ -57,7 +57,10 @@ async def _schedule_device_sync(hass: Any, entry: ConfigEntry) -> None:
 class XiaoduConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the Xiaodu config flow."""
 
-    VERSION = 1
+    # v2: the CLOTHES_RACK legend moved its stored ``caps`` from ``percentage``
+    # to ``height`` (turnOn/turnOff = lighting; increment/decrementHeight = the
+    # rack's raise/lower). ``async_migrate_entry`` rewrites the stored caps.
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the flow."""

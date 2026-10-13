@@ -1620,15 +1620,18 @@ def _clothes_rack_hass():
     )
 
 
-def _clothes_rack_map(hass, caps=None):
-    """Seed an enhanced set for the 晾衣杆 cover (its light explicitly hidden)."""
+def _clothes_rack_map(hass, caps=None, *, light_visible=False):
+    """Seed an enhanced set for the 晾衣杆 cover.
+
+    By default the rack's light is explicitly hidden (the rack then falls back
+    to cover open/close on power). ``light_visible=True`` leaves it exposed so
+    the rack *claims* it for turnOn/turnOff.
+    """
     all_caps = [c for c in devices_mod.CAP_LABELS if c != devices_mod.CAP_POWER]
-    config = {
-        "rack-dev": {
-            "caps": list(all_caps if caps is None else caps),
-            "hidden": ["light.rack_light"],
-        }
-    }
+    obj: dict = {"caps": list(all_caps if caps is None else caps)}
+    if not light_visible:
+        obj["hidden"] = ["light.rack_light"]
+    config = {"rack-dev": obj}
     return _seed_enhanced(
         hass,
         config=config,
@@ -1747,9 +1750,10 @@ def test_control_unknown_state_is_not_offline():
     assert hass.service_calls == [("cover", "open_cover", {"entity_id": "cover.rack"})]
 
 
-def test_discovery_multi_unit_device_exposes_two_appliances():
-    # Both the 晾衣杆 cover and its light are selected -> two appliances with
-    # their own types, names and actions.
+def test_discovery_clothes_rack_claims_light_into_one_appliance():
+    # A rack with a light entity exposes ONE CLOTHES_RACK appliance: the light
+    # is claimed for turnOn/turnOff (照明), so it no longer surfaces as its own
+    # LIGHT appliance.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
@@ -1764,23 +1768,20 @@ def test_discovery_multi_unit_device_exposes_two_appliances():
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
-    appliances = {a["applianceId"]: a for a in result["payload"]["discoveredAppliances"]}
-    rack_dev = _find_device(devices, "cover.rack")
-    light_dev = _find_device(devices, "light.rack_light")
-    assert set(appliances) == {rack_dev.device_id, light_dev.device_id}
-    rack = appliances[rack_dev.device_id]
+    appliances = result["payload"]["discoveredAppliances"]
+    assert len(appliances) == 1
+    rack = appliances[0]
     assert rack["applianceTypes"] == ["CLOTHES_RACK"]
-    assert {"turnOn", "turnOff", "pause"} <= set(rack["actions"])
+    assert {"turnOn", "turnOff", "incrementHeight", "decrementHeight", "pause"} <= set(rack["actions"])
     assert rack["friendlyName"] == "晾衣杆"
-    light = appliances[light_dev.device_id]
-    assert light["applianceTypes"] == ["LIGHT"]
-    assert {"turnOn", "turnOff"} <= set(light["actions"])
-    assert light["friendlyName"] == "晾衣杆 灯"
+    # _find_device resolves through the bindings -> the light belongs to the rack.
+    rack_dev = _find_device(devices, "light.rack_light")
+    assert rack_dev is not None and rack_dev.profile_key == "CLOTHES_RACK"
 
 
-def test_discovery_default_all_config_surfaces_leftover_light():
-    # A default-all device (empty ``caps``): the unclaimed light must surface as
-    # its own LIGHT appliance instead of being silently dropped.
+def test_discovery_clothes_rack_light_not_leftover():
+    # A default-all rack config: the light is claimed, so no leftover LIGHT
+    # appliance is produced alongside the rack.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
@@ -1795,20 +1796,17 @@ def test_discovery_default_all_config_surfaces_leftover_light():
             _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {"accessToken": "t"}),
         )
     )
-    appl = {a["applianceTypes"][0]: a for a in result["payload"]["discoveredAppliances"]}
-    assert set(appl) == {"CLOTHES_RACK", "LIGHT"}
-    assert {"turnOn", "turnOff", "pause"} <= set(appl["CLOTHES_RACK"]["actions"])
-    assert {"turnOn", "turnOff"} <= set(appl["LIGHT"]["actions"])
-    assert appl["LIGHT"]["friendlyName"] == "晾衣杆 灯"
+    types = {a["applianceTypes"][0] for a in result["payload"]["discoveredAppliances"]}
+    assert types == {"CLOTHES_RACK"}
 
 
-def test_discovery_narrowed_config_narrows_caps_not_hidden():
-    # Device-level ``caps`` narrows both the profile aggregate and the leftover
-    # light; the light stays exposed (not hidden) and surfaces as its own LIGHT.
+def test_discovery_narrowed_config_keeps_claimed_light():
+    # Device-level ``caps`` narrows the rack aggregate; the light is still
+    # claimed (power is always kept) so no separate LIGHT appliance appears.
     hass = _clothes_rack_hass()
     devices = _seed_enhanced(
         hass,
-        config={"rack-dev": {"caps": ["percentage"]}},
+        config={"rack-dev": {"caps": ["height"]}},
         device_of=lambda eid: "rack-dev",
         name_of=lambda key: "晾衣杆",
     )
@@ -1820,23 +1818,18 @@ def test_discovery_narrowed_config_narrows_caps_not_hidden():
         )
     )
     rack_dev = _find_device(devices, "cover.rack")
-    light_dev = _find_device(devices, "light.rack_light")
     ids = [a["applianceId"] for a in result["payload"]["discoveredAppliances"]]
-    assert sorted(ids) == sorted([rack_dev.device_id, light_dev.device_id])
-    # Device-level narrowing is applied to the profile aggregate too.
-    assert {c.key for c in rack_dev.capabilities} == {"power", "percentage"}
-    assert {c.key for c in light_dev.capabilities} == {"power"}
+    assert ids == [rack_dev.device_id]
+    # ``height`` selected -> power (implicit) + height; no percentage.
+    assert {c.key for c in rack_dev.capabilities} == {"power", "height"}
 
 
-def test_control_multi_unit_light_routes_to_light_entity():
+def test_control_clothes_rack_turn_on_function_routes_to_light():
+    # The App channel sends an undocumented ``function: "light"``; turnOn must
+    # reach the light entity (照明), not the cover.
     hass = _clothes_rack_hass()
-    devices = _seed_enhanced(
-        hass,
-        config={"rack-dev": {"caps": []}},
-        device_of=lambda eid: "rack-dev",
-        name_of=lambda key: "晾衣杆",
-    )
-    aid = _device_id_of(devices, "light.rack_light")
+    devices = _clothes_rack_map(hass, light_visible=True)
+    aid = _device_id_of(devices, "cover.rack")
     result = run(
         handle_request(
             hass,
@@ -1844,14 +1837,56 @@ def test_control_multi_unit_light_routes_to_light_entity():
             _request(
                 NAMESPACE_CONTROL,
                 "TurnOnRequest",
-                {"accessToken": "t", "appliance": {"applianceId": aid}},
+                {"accessToken": "t", "appliance": {"applianceId": aid}, "function": "light"},
             ),
         )
     )
     assert result["header"]["name"] == "TurnOnConfirmation"
-    assert hass.service_calls == [
-        ("light", "turn_on", {"entity_id": "light.rack_light"})
-    ]
+    assert hass.service_calls == [("light", "turn_on", {"entity_id": "light.rack_light"})]
+
+
+def test_control_clothes_rack_increment_height_uses_contract_sample():
+    # control-message.md IncrementHeightRequest sample: deltaValue in METER.
+    # The airer has no travel attribute, so this degrades to a full raise.
+    hass = _clothes_rack_hass()
+    devices = _clothes_rack_map(hass)
+    aid = _device_id_of(devices, "cover.rack")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "IncrementHeightRequest",
+                {
+                    "accessToken": "t",
+                    "appliance": {"applianceId": aid},
+                    "deltaValue": {"value": "0.5", "scale": "METER"},
+                },
+            ),
+        )
+    )
+    assert result["header"]["name"] == "IncrementHeightConfirmation"
+    assert hass.service_calls == [("cover", "open_cover", {"entity_id": "cover.rack"})]
+
+
+def test_control_clothes_rack_decrement_height_lowers_cover():
+    hass = _clothes_rack_hass()
+    devices = _clothes_rack_map(hass)
+    aid = _device_id_of(devices, "cover.rack")
+    result = run(
+        handle_request(
+            hass,
+            devices,
+            _request(
+                NAMESPACE_CONTROL,
+                "DecrementHeightRequest",
+                {"accessToken": "t", "appliance": {"applianceId": aid}},
+            ),
+        )
+    )
+    assert result["header"]["name"] == "DecrementHeightConfirmation"
+    assert hass.service_calls == [("cover", "close_cover", {"entity_id": "cover.rack"})]
 
 
 # --- v0.7.0: YUBA / SOCKET / timing / vacuum continue -----------------------

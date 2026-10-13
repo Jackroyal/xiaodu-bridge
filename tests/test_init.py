@@ -42,6 +42,7 @@ from custom_components.xiaodu_bridge import (
     _sync_device_registry,
     async_setup_entry,
     async_unload_entry,
+    async_migrate_entry,
 )
 from custom_components.xiaodu_bridge.const import (
     CONF_CLIENT_ID,
@@ -173,6 +174,102 @@ async def test_remove_config_entry_device(hass: HomeAssistant) -> None:
         name="次卧灯",
     )
     assert not await async_remove_config_entry_device(hass, entry, foreign)
+
+
+async def _seed_rack_and_plain(hass: HomeAssistant, entry) -> tuple[str, str]:
+    """Register one 晾衣架 device and one plain light device (entities + states).
+
+    Returns ``(rack_device_key, plain_device_key)``.
+    """
+    device_registry = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    rack = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "rack")},
+        name="阳台晾衣架",
+    )
+    plain = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "plain_lamp")},
+        name="客厅灯",
+    )
+    ent_reg.async_get_or_create(
+        "cover", "test", "rack_cover", suggested_object_id="airer", device_id=rack.id
+    )
+    ent_reg.async_get_or_create(
+        "light", "test", "rack_light", suggested_object_id="rack_light", device_id=rack.id
+    )
+    ent_reg.async_get_or_create(
+        "light", "test", "plain_light", suggested_object_id="plain_light", device_id=plain.id
+    )
+    hass.states.async_set("cover.airer", "closed")
+    hass.states.async_set("light.rack_light", "off")
+    hass.states.async_set("light.plain_light", "off")
+    return rack.id, plain.id
+
+
+async def test_migrate_entry_v2_moves_rack_caps(hass: HomeAssistant) -> None:
+    """A narrowed rack drops ``percentage`` and gains ``height``; others untouched."""
+    entry = MockConfigEntry(domain=DOMAIN, version=1, data=_entry_data())
+    entry.add_to_hass(hass)
+    rack_id, plain_id = await _seed_rack_and_plain(hass, entry)
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            CONF_DEVICES: {
+                rack_id: {"caps": ["power", "percentage", "pause"]},
+                plain_id: {"caps": ["power", "brightness"]},
+                # A legacy bare-list value must be copied through untouched.
+                "legacy-key": ["power"],
+            }
+        },
+    )
+
+    assert await async_migrate_entry(hass, entry)
+    assert entry.version == 2
+    devices = entry.options[CONF_DEVICES]
+    assert "percentage" not in devices[rack_id]["caps"]
+    assert set(devices[rack_id]["caps"]) == {"power", "pause", "height"}
+    # A non-rack device is never touched, whatever its stored shape.
+    assert devices[plain_id]["caps"] == ["power", "brightness"]
+    assert devices["legacy-key"] == ["power"]
+
+    # Idempotent: a second run leaves everything unchanged.
+    assert await async_migrate_entry(hass, entry)
+    assert entry.options[CONF_DEVICES] == devices
+
+
+async def test_migrate_entry_v2_without_rack_only_bumps_version(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, version=1, data=_entry_data())
+    entry.add_to_hass(hass)
+    plain = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("test", "plain_lamp")},
+        name="客厅灯",
+    )
+    er.async_get(hass).async_get_or_create(
+        "light", "test", "plain_light", suggested_object_id="plain_light", device_id=plain.id
+    )
+    hass.states.async_set("light.plain_light", "off")
+    options = {CONF_DEVICES: {plain.id: {"caps": ["power", "brightness"]}}}
+    hass.config_entries.async_update_entry(entry, options=options)
+
+    assert await async_migrate_entry(hass, entry)
+    assert entry.version == 2
+    assert entry.options[CONF_DEVICES] == options[CONF_DEVICES]
+
+
+async def test_migrate_entry_v2_default_all_rack_untouched(hass: HomeAssistant) -> None:
+    """A default-all rack (``caps: []``) already follows the new legend."""
+    entry = MockConfigEntry(domain=DOMAIN, version=1, data=_entry_data())
+    entry.add_to_hass(hass)
+    rack_id, _plain = await _seed_rack_and_plain(hass, entry)
+    hass.config_entries.async_update_entry(
+        entry, options={CONF_DEVICES: {rack_id: {"caps": []}}}
+    )
+    assert await async_migrate_entry(hass, entry)
+    assert entry.version == 2
+    assert entry.options[CONF_DEVICES] == {rack_id: {"caps": []}}
 
 
 async def _advance_past_debounce(hass: HomeAssistant) -> None:

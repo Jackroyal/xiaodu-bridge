@@ -18,7 +18,7 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.13**。
+当前集成版本：**v0.9.14**。
 
 ## 功能
 
@@ -45,12 +45,16 @@
 
 ### HACS（推荐）
 
+`xiaodu bridge` 尚未上架 HACS 默认商店，需要先添加为自定义仓库：
+
 1. 确认已安装 [HACS](https://hacs.xyz)。
-2. 打开 **HACS → Integrations**。
-3. 选择 **Explore & Download Repositories**。
-4. 搜索 **xiaodu bridge**，或先添加本仓库为 Custom Repository：
-   `https://github.com/Jackroyal/xiaodu-bridge`，类别选择 **Integration**。
-5. 下载后重启 Home Assistant。
+2. 打开 **HACS → Integrations**，右上角 `⋮` → **Custom repositories**，
+   地址填 `https://github.com/Jackroyal/xiaodu-bridge`，类别选择 **Integration**。
+3. 回到 **HACS → Integrations**，搜索 **xiaodu bridge**，下载。
+4. 重启 Home Assistant。
+
+HACS 下载只是把文件装到位。重启后还要在 **设置 → 设备与服务 → 添加集成**里
+搜索 **xiaodu bridge** 添加一次，在那里填写 OAuth 信息（见下文「配置集成」）。
 
 ### 手动安装
 
@@ -119,12 +123,14 @@ Home Assistant :8123
 | 设备 | DuerOS 类型 | 合成能力 |
 |---|---|---|
 | 浴霸 | `YUBA` | 开关（取暖 / 吹风 / 换气）、模式（`HEAT` / `FAN` / `VENTILATION`）、暖风档位、风速、目标温度 |
-| 晾衣架 | `CLOTHES_RACK` | 开关（升降）、位置、暂停、模式（`DRYING` / `DISINFECT`） |
+| 晾衣架 | `CLOTHES_RACK` | 升降(incrementHeight/decrementHeight) / 暂停 / 灯(turnOn,turnOff) / 模式（`DRYING` / `DISINFECT`） |
 | 扫地机器人 | `SWEEPING_ROBOT` | 开关、暂停、吸力、电量 |
 | 洗衣机 | `WASHING_MACHINE` | 电源（开 / 关 / 启动）、洗涤模式、水位、目标温度、运行状态、剩余时间 |
 
-浴霸、晾衣架的灯不并入复合设备（DuerOS 无对应动作），而是拆分为独立的 `LIGHT`
-设备，亮度 / 色温 / 颜色按实体实际能力自动暴露。
+晾衣架的灯并入 `CLOTHES_RACK`（`turnOn` / `turnOff` 即照明，与 App 话术一致），
+不再单独拆为一个 `LIGHT` 设备；没有灯实体的机型则退化回开关映射到杆子升降。
+浴霸的灯 DuerOS 无对应动作，仍拆分为独立的 `LIGHT` 设备，亮度 / 色温 / 颜色按实体
+实际能力自动暴露。
 
 **通用能力合成** —— 按 HA 实体域映射：
 
@@ -159,6 +165,7 @@ Home Assistant :8123
 | `targetHumidity` | 目标湿度 | 控制 | `targetHumidity` |
 | `mode` | 模式 | 控制 | `mode` |
 | `percentage` | 位置 | 控制 | `percentage` |
+| `height` | 升降 | 控制 | —（`incrementHeight` / `decrementHeight`，无属性） |
 | `suction` | 吸力 | 控制 | `suction` |
 | `waterLevel` | 水量 / 水位 | 控制 | `waterLevel` |
 | `pause` | 暂停 | 控制 | `pauseState` |
@@ -192,7 +199,7 @@ Home Assistant :8123
 
 ## 配置设备与能力
 
-添加集成后，打开集成条目选择 **设备与能力**：
+添加集成后，打开集成条目 →「配置」，进入「小度中枢」页：
 
 1. 中枢菜单提供设备列表、添加 / 移除设备、保存并完成。
 2. 设备列表按「房间 · 设备名」展示，新增设备默认暴露全部可用能力。

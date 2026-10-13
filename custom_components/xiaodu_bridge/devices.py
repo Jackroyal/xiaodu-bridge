@@ -96,6 +96,7 @@ CAP_LABELS = {
     "targetHumidity": "目标湿度",
     "waterLevel": "水位",
     "percentage": "位置",
+    "height": "升降",
     "pause": "暂停",
     "continue": "继续",
 }

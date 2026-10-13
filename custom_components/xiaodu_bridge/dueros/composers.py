@@ -11,6 +11,7 @@ tested with fake ``State`` objects.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Iterable, Mapping
 
 from .model import (
@@ -44,8 +45,10 @@ from .constants import (
     ATTR_MUTE_STATE,
     ACTION_CONTINUE,
     ACTION_DECREMENT_FAN_SPEED,
+    ACTION_DECREMENT_HEIGHT,
     ACTION_DECREMENT_TEMPERATURE,
     ACTION_INCREMENT_FAN_SPEED,
+    ACTION_INCREMENT_HEIGHT,
     ACTION_INCREMENT_TEMPERATURE,
     ACTION_PAUSE,
     ACTION_SET_FAN_SPEED,
@@ -62,6 +65,9 @@ from .constants import (
     ACTION_TURN_ON,
     ACTION_UNSET_MODE,
 )
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 # --- value helpers -----------------------------------------------------------
@@ -213,8 +219,17 @@ def power_mapping(
     actions: tuple[str, ...] = (ACTION_TURN_ON, ACTION_TURN_OFF),
     power_predicate: Callable[[Any], bool] | None = None,
     action_calls: dict[str, tuple[str, str, dict[str, Any]]] | None = None,
+    function_targets: Mapping[str, str] | None = None,
 ) -> CapabilityMapping:
-    """Single on/off entity -> ``power`` (turnOnState)."""
+    """Single on/off entity -> ``power`` (turnOnState).
+
+    ``function_targets`` maps a DuerOS ``function`` payload value to a sibling
+    entity. Some appliances (e.g. the Xiaodu App's CLOTHES_RACK lighting toggle)
+    send an undocumented ``function`` field to address a sub-function on the
+    same physical device; when it names a known target the call is routed
+    there, otherwise the mapping's default ``entity_id`` is used (a warning is
+    logged for an unknown value instead of silently ignoring it).
+    """
     cap = DuerCapability(
         capability_key,
         "开关",
@@ -234,18 +249,36 @@ def power_mapping(
         return _turn_on_state_attr(on)
 
     def write(ctx: WriteContext) -> list[ServiceCall] | None:
+        service: str | None = None
         if ctx.action.name == ACTION_TURN_ON:
-            return [ServiceCall(domain, on_service, {}, entity_id)]
-        if ctx.action.name == ACTION_TURN_OFF:
-            return [ServiceCall(domain, off_service, {}, entity_id)]
-        if action_calls and ctx.action.name in action_calls:
+            service = on_service
+        elif ctx.action.name == ACTION_TURN_OFF:
+            service = off_service
+        elif action_calls and ctx.action.name in action_calls:
             d, s, data = action_calls[ctx.action.name]
             return [ServiceCall(d, s, dict(data), entity_id)]
-        return None
+        if service is None:
+            return None
+        target = entity_id
+        function = _payload_value(ctx.payload, "function")
+        if function is not None:
+            if function_targets and function in function_targets:
+                target = function_targets[function]
+            else:
+                # Never silently drop a sub-function selector we don't know.
+                _LOGGER.warning(
+                    "xiaodu_bridge %s：未知 function %r，回退到默认实体 %s",
+                    entity_id,
+                    function,
+                    entity_id,
+                )
+        return [ServiceCall(domain, service, {}, target)]
 
-    return CapabilityMapping(
-        cap, (EntityBinding(entity_id, "power"),), read=read, write=write
-    )
+    bindings = [EntityBinding(entity_id, "power")]
+    for function, target in (function_targets or {}).items():
+        if target and target != entity_id:
+            bindings.append(EntityBinding(target, f"function:{function}"))
+    return CapabilityMapping(cap, tuple(bindings), read=read, write=write)
 
 
 def mode_switches_mapping(
@@ -453,6 +486,60 @@ def percentage_mapping(
         return make_attribute(ATTR_PERCENTAGE, pos if pos is not None else 0, scale="%", legal="[0, 100]")
 
     return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read)
+
+
+def cover_height_mapping(
+    *,
+    entity_id: str,
+    appliance_types: tuple[str, ...],
+    domain: str = "cover",
+    raise_service: str = "open_cover",
+    lower_service: str = "close_cover",
+    capability_key: str = "height",
+) -> CapabilityMapping:
+    """A clothes rack's raise / lower (``incrementHeight`` / ``decrementHeight``).
+
+    The appliance is exposed as ``CLOTHES_RACK`` whose height actions drive the
+    cover's full travel (the Xiaomi Home airer's ``motor-control`` up -> HA
+    ``OPEN``, down -> ``CLOSE``): no position attribute is advertised because
+    the airer's miot spec has none. A request that still carries a ``deltaValue``
+    (METER / FOOT / percent) is honoured as a full up/down move and the ignored
+    delta is logged rather than answered as unsupported.
+    """
+    cap = DuerCapability(
+        capability_key,
+        "升降",
+        kind=CAP_KIND_CONTROL,
+        appliance_types=appliance_types,
+        attributes=(),
+        actions=(
+            DuerAction(ACTION_INCREMENT_HEIGHT, capability_key),
+            DuerAction(ACTION_DECREMENT_HEIGHT, capability_key),
+        ),
+    )
+
+    def read(_ctx: ReadContext) -> AttributeValue | None:
+        # No position / travel attribute on this appliance.
+        return None
+
+    def write(ctx: WriteContext) -> list[ServiceCall] | None:
+        if ctx.action.name == ACTION_INCREMENT_HEIGHT:
+            service = raise_service
+        elif ctx.action.name == ACTION_DECREMENT_HEIGHT:
+            service = lower_service
+        else:
+            return None
+        delta = ctx.payload.get("deltaValue")
+        if delta:
+            _LOGGER.warning(
+                "xiaodu_bridge %s：忽略升降增量 deltaValue=%s（本机无位置/行程属性，按整程%s）",
+                entity_id,
+                delta,
+                "上升" if ctx.action.name == ACTION_INCREMENT_HEIGHT else "下降",
+            )
+        return [ServiceCall(domain, service, {}, entity_id)]
+
+    return CapabilityMapping(cap, (EntityBinding(entity_id, "value"),), read=read, write=write)
 
 
 def pause_mapping(

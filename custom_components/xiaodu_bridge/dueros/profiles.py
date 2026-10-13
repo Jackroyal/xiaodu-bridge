@@ -16,10 +16,10 @@ from typing import Any
 
 from .composers import (
     composite_power_mapping,
+    cover_height_mapping,
     enum_value_mapping,
     mode_switches_mapping,
     pause_mapping,
-    percentage_mapping,
     power_mapping,
     select_mapping,
     sensor_enum_mapping,
@@ -396,6 +396,7 @@ ROLE_META: dict[str, dict[str, Any]] = {
     "robot": {"label": "扫地机主体", "domains": ("vacuum",)},
     "battery": {"label": "电量", "domains": ("sensor",)},
     "cover": {"label": "晾衣杆主体", "domains": ("cover",)},
+    "light": {"label": "灯", "domains": ("light",)},
     "dry": {"label": "烘干", "domains": ("switch", "select")},
     "uv": {"label": "杀菌", "domains": ("switch", "select")},
     "power": {"label": "电源", "domains": ("switch",)},
@@ -522,21 +523,38 @@ SWEEPING_ROBOT_PROFILE = DuerDeviceProfile(
 
 def build_clothes_rack(ctx: DeviceBuildContext) -> list[DuerDevice]:
     cover = _suggest_role(ctx, "cover")
+    light = _suggest_role(ctx, "light")
     dry = _suggest_role(ctx, "dry")
     uv = _suggest_role(ctx, "uv")
     if not cover:
         return []
 
     appliance_types = (APPLIANCE_CLOTHES_RACK,)
-    mappings = [
-        power_mapping(
+    # CLOTHES_RACK's turnOn/turnOff are the *lighting* (the Xiaodu App device
+    # page uses exactly this wording); the rack's raise/lower are the height
+    # actions. When the rack has a light entity, power drives it (and claims it
+    # so it no longer surfaces as a separate LIGHT appliance); a rack without a
+    # light keeps the legacy cover open/close behaviour on power.
+    if light:
+        power = power_mapping(
+            domain="light",
+            entity_id=light,
+            appliance_types=appliance_types,
+            on_service="turn_on",
+            off_service="turn_off",
+            function_targets={"light": light},
+        )
+    else:
+        power = power_mapping(
             domain="cover",
             entity_id=cover,
             appliance_types=appliance_types,
             on_service="open_cover",
             off_service="close_cover",
-        ),
-        percentage_mapping(entity_id=cover, appliance_types=appliance_types),
+        )
+    mappings = [
+        power,
+        cover_height_mapping(entity_id=cover, appliance_types=appliance_types),
         pause_mapping(entity_id=cover, appliance_types=appliance_types, domain="cover", include_continue=False),
     ]
     # mode: N switches synthesise the active drying / disinfecting function.
@@ -576,7 +594,7 @@ def build_clothes_rack(ctx: DeviceBuildContext) -> list[DuerDevice]:
     ]
 
 
-_RACK_ROLES, _RACK_ROLE_DOMAINS = _resolve_roles(("cover", "dry", "uv"))
+_RACK_ROLES, _RACK_ROLE_DOMAINS = _resolve_roles(("cover", "light", "dry", "uv"))
 CLOTHES_RACK_PROFILE = DuerDeviceProfile(
     key="CLOTHES_RACK",
     appliance_types=(APPLIANCE_CLOTHES_RACK,),

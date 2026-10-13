@@ -74,6 +74,9 @@ ACTION_INCREMENT_TEMPERATURE = "incrementTemperature"
 ACTION_DECREMENT_TEMPERATURE = "decrementTemperature"
 ACTION_INCREMENT_FAN_SPEED = "incrementFanSpeed"
 ACTION_DECREMENT_FAN_SPEED = "decrementFanSpeed"
+# CLOTHES_RACK 升降（control-message.md: IncrementHeightRequest / DecrementHeightRequest）
+ACTION_INCREMENT_HEIGHT = "incrementHeight"
+ACTION_DECREMENT_HEIGHT = "decrementHeight"
 
 # Attribute names (match protocols/attributes.md). Used by ``DuerAttribute``.
 ATTR_TURN_ON_STATE = "turnOnState"

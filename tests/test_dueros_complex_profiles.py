@@ -1,5 +1,6 @@
 """Pure-logic tests for the SWEEPING_ROBOT / CLOTHES_RACK / WASHING_MACHINE profiles."""
 
+import logging
 import types
 
 from tests._dueros_loader import load_semantic_model
@@ -102,13 +103,23 @@ def _rack_states():
     ]
 
 
+def _rack_light_states():
+    """A rack with a light entity and no dry/uv switches (minimal action set)."""
+    return [
+        FakeState("cover.airer", "closed", {"friendly_name": "阳台晾衣架"}),
+        FakeState("light.airer_light", "off", {"friendly_name": "晾衣架 灯"}),
+    ]
+
+
 def test_clothes_rack_build_and_mode():
     devs = build_clothes_rack(_ctx(_rack_states()))
     assert len(devs) == 1
     dev = devs[0]
     assert dev.profile_key == "CLOTHES_RACK"
     keys = {c.key for c in dev.capabilities}
-    assert {"power", "percentage", "pause", "mode"} <= keys
+    assert {"power", "height", "pause", "mode"} <= keys
+    # The old position capability is gone (the airer has no position attribute).
+    assert "percentage" not in keys
     # mode read: uv on -> DISINFECT (DuerOS CLOTHES_RACK mode codes are
     # English, not the Chinese friendly-name labels).
     mode = next(c for c in dev.capabilities if c.key == "mode")
@@ -119,13 +130,80 @@ def test_clothes_rack_build_and_mode():
     entities = {"dry": FakeState("switch.dry", "on"), "uv": FakeState("switch.uv", "off")}
     val = mode.read(types.SimpleNamespace(entities=entities))
     assert val.value == "DRYING"
-    # percentage read 60
-    pct = next(c for c in dev.capabilities if c.key == "percentage")
-    p = pct.read(types.SimpleNamespace(entities={"value": FakeState("cover.airer", "open", {"current_position": 60})}))
-    assert p.value == 60
 
 
-def test_clothes_rack_power_open_close():
+def test_clothes_rack_light_actions_and_services():
+    dev = build_clothes_rack(_ctx(_rack_light_states()))[0]
+    # power (灯) first, then the height actions, then pause.
+    assert dev.actions() == [
+        "turnOn", "turnOff", "incrementHeight", "decrementHeight", "pause",
+    ]
+    power = next(c for c in dev.capabilities if c.key == "power")
+    assert ("light.airer_light", "power") in {
+        (b.entity_id, b.role) for b in power.bindings
+    }
+    # turnOn / turnOff drive the light, not the cover.
+    assert power.write(types.SimpleNamespace(
+        action=DuerAction("turnOn", "power"), payload={}
+    ))[0].target_entity_id == "light.airer_light"
+    assert power.write(types.SimpleNamespace(
+        action=DuerAction("turnOn", "power"), payload={}
+    ))[0].service == "turn_on"
+    assert power.write(types.SimpleNamespace(
+        action=DuerAction("turnOff", "power"), payload={}
+    ))[0].service == "turn_off"
+    # Height raises/lowers the cover (open = 上升).
+    height = next(c for c in dev.capabilities if c.key == "height")
+    up = height.write(types.SimpleNamespace(
+        action=DuerAction("incrementHeight", "height"), payload={}
+    ))
+    assert (up[0].domain, up[0].service) == ("cover", "open_cover")
+    down = height.write(types.SimpleNamespace(
+        action=DuerAction("decrementHeight", "height"), payload={}
+    ))
+    assert (down[0].domain, down[0].service) == ("cover", "close_cover")
+    pause = next(c for c in dev.capabilities if c.key == "pause")
+    stop = pause.write(types.SimpleNamespace(
+        action=DuerAction("pause", "pause"), payload={}
+    ))
+    assert (stop[0].domain, stop[0].service) == ("cover", "stop_cover")
+
+
+def test_clothes_rack_power_function_dispatch(caplog):
+    dev = build_clothes_rack(_ctx(_rack_light_states()))[0]
+    power = next(c for c in dev.capabilities if c.key == "power")
+
+    def target(payload):
+        return power.write(types.SimpleNamespace(
+            action=DuerAction("turnOn", "power"), payload=payload
+        ))[0].target_entity_id
+
+    # No function field -> the mapping's default (the light).
+    assert target({}) == "light.airer_light"
+    # App channel: the undocumented ``function: "light"`` -> the light target.
+    assert target({"function": "light"}) == "light.airer_light"
+    # Unknown function value -> warn but still fall back to the light.
+    with caplog.at_level(logging.WARNING, logger="xiaodu.dueros.composers"):
+        assert target({"function": "bogus"}) == "light.airer_light"
+    assert any("function" in r.message for r in caplog.records)
+
+
+def test_clothes_rack_height_delta_degrades_to_full_travel(caplog):
+    dev = build_clothes_rack(_ctx(_rack_light_states()))[0]
+    height = next(c for c in dev.capabilities if c.key == "height")
+    with caplog.at_level(logging.WARNING, logger="xiaodu.dueros.composers"):
+        call = height.write(types.SimpleNamespace(
+            action=DuerAction("incrementHeight", "height"),
+            payload={"deltaValue": {"value": 0.5, "scale": "METER"}},
+        ))
+    # No position/travel attribute: the delta is ignored, a full raise is issued
+    # (never answered as unsupported).
+    assert (call[0].domain, call[0].service) == ("cover", "open_cover")
+    assert any("deltaValue" in r.message for r in caplog.records)
+
+
+def test_clothes_rack_power_open_close_without_light():
+    # A rack without a light entity keeps the legacy cover open/close on power.
     dev = build_clothes_rack(_ctx(_rack_states()))[0]
     power = next(c for c in dev.capabilities if c.key == "power")
     assert power.write(types.SimpleNamespace(action=DuerAction("turnOn", "power"), payload={}))[0].service == "open_cover"

@@ -583,8 +583,9 @@ def test_role_binding_specs_lists_every_role_with_empty_candidates_when_unbound(
     # candidate was the previous regression).
     bare = [_ent("cover.rack", "晾衣杆", "cover")]
     specs = enhanced_mod.role_binding_specs(CLOTHES_RACK_PROFILE, bare)
-    assert set(specs) == {"cover", "dry", "uv"}
+    assert set(specs) == {"cover", "light", "dry", "uv"}
     assert [e["id"] for e in specs["cover"]] == ["cover.rack"]
+    assert specs["light"] == []
     assert specs["dry"] == []
     assert specs["uv"] == []
 
@@ -593,7 +594,7 @@ def test_role_binding_specs_in_domain_switch_adds_candidate_aux_excluded():
     bare = [_ent("cover.rack", "晾衣杆", "cover")]
     with_dry = bare + [_ent("switch.dry", "烘干", "switch")]
     specs = enhanced_mod.role_binding_specs(CLOTHES_RACK_PROFILE, with_dry)
-    assert set(specs) == {"cover", "dry", "uv"}
+    assert set(specs) == {"cover", "light", "dry", "uv"}
     # dry and uv share the switch/select domains, so both may bind the same
     # in-domain switch.
     assert [e["id"] for e in specs["dry"]] == ["switch.dry"]
