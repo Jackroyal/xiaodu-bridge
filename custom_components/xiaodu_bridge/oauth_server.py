@@ -46,16 +46,17 @@ from aiohttp import web
 from homeassistant.auth.models import AuthFlowContext
 from homeassistant.components.auth import indieauth
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.auth import async_user_not_allowed_do_auth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-try:  # Home Assistant >= 2026.10 replaced voluptuous with probatio.
+try:  # Home Assistant >= 2026.9 replaced the voluptuous stack with probatio.
     import probatio
 except ImportError:  # pragma: no cover - older HA
     probatio = None  # type: ignore[assignment]
 
-try:  # Home Assistant < 2026.10.
+try:  # Home Assistant < 2026.9.
     import voluptuous_serialize
 except ImportError:  # pragma: no cover - newer HA
     try:
@@ -441,7 +442,7 @@ def _clear_failures(hass: HomeAssistant, remote_addr: str) -> None:
 def _schema_fields(schema: Any) -> list[dict[str, Any]]:
     """Convert a flow data schema into renderable fields.
 
-    HA 2026.10 dropped ``voluptuous-serialize`` in favour of ``probatio``, whose
+    HA 2026.9 replaced ``voluptuous-serialize`` with ``probatio``, whose
     ``to_field_list`` emits the same field-list shape. Try the serializer that
     matches the running HA, and never let a schema quirk break the login page.
     """
@@ -616,10 +617,36 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
                     nonce="",
                 )
             user = await hass.auth.async_get_user_by_credentials(credentials)
-            user_id = user.id if user else ""
+            if user is None:
+                _delete_session(hass, nonce)
+                _LOGGER.warning("Xiaodu authorize refused: credentials resolved to no user")
+                return self._page(
+                    client_id,
+                    redirect_uri,
+                    state,
+                    summary=summary,
+                    fields=[],
+                    subtitle=_SUBTITLE_LOGIN,
+                    submit="登录并授权",
+                    error="登录未完成，请重试",
+                    nonce="",
+                )
+
+            if user_access_error := async_user_not_allowed_do_auth(hass, user, request):
+                _delete_session(hass, nonce)
+                _LOGGER.warning(
+                    "Xiaodu authorize refused for user %s: %s", user.id, user_access_error
+                )
+                return self._page(
+                    client_id, redirect_uri, state,
+                    summary=summary, fields=[],
+                    subtitle=_SUBTITLE_LOGIN, submit="登录并授权",
+                    error="该账号不允许授权（已停用，或仅限本地网络登录）", nonce="",
+                )
+
+            user_id = user.id
             _clear_failures(hass, remote_addr)
             _delete_session(hass, nonce)
-            _LOGGER.info("Xiaodu bound by user %s", user_id or "unknown")
 
             store = await _get_store(hass)
             code = store.issue_code(client_id, redirect_uri, user_id)
