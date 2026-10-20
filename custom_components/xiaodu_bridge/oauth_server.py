@@ -50,10 +50,20 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-try:
+try:  # Home Assistant >= 2026.10 replaced voluptuous with probatio.
+    import probatio
+except ImportError:  # pragma: no cover - older HA
+    probatio = None  # type: ignore[assignment]
+
+try:  # Home Assistant < 2026.10.
     import voluptuous_serialize
-except ImportError:  # pragma: no cover
-    from homeassistant.helpers import voluptuous_serialize  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover - newer HA
+    try:
+        from homeassistant.helpers import (  # type: ignore[no-redef]
+            voluptuous_serialize,
+        )
+    except ImportError:
+        voluptuous_serialize = None  # type: ignore[assignment]
 
 from .const import (
     CONF_CLIENT_ID,
@@ -429,13 +439,22 @@ def _clear_failures(hass: HomeAssistant, remote_addr: str) -> None:
 
 
 def _schema_fields(schema: Any) -> list[dict[str, Any]]:
-    """Convert a flow data schema into renderable fields."""
+    """Convert a flow data schema into renderable fields.
+
+    HA 2026.10 dropped ``voluptuous-serialize`` in favour of ``probatio``, whose
+    ``to_field_list`` emits the same field-list shape. Try the serializer that
+    matches the running HA, and never let a schema quirk break the login page.
+    """
     if schema is None:
         return []
     try:
-        return voluptuous_serialize.convert(schema)
+        if probatio is not None:
+            return probatio.to_field_list(schema)
+        if voluptuous_serialize is not None:
+            return voluptuous_serialize.convert(schema)
     except Exception:  # noqa: BLE001 - never break the authorize page
-        return []
+        _LOGGER.debug("Could not serialize login flow schema", exc_info=True)
+    return []
 
 
 def _render_field(field: dict[str, Any]) -> str:
