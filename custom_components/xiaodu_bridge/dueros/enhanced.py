@@ -9,10 +9,11 @@ device is surfaced as one or more ``DuerDevice`` appliances:
    composers), so lights, switches, sensors, fans, climate, media players etc.
    all flow through the same semantic model.
 
-``build_enhanced_device_set`` optionally filters by ``options[CONF_DEVICES]``
+``build_enhanced_device_set`` filters by ``options[CONF_DEVICES]``
 (device_key -> a per-device object from ``dueros.device_config`` with optional
 caps / bindings / hidden / names / mode), matching the "设备 → 能力" options UI
-and its per-device override sub-flow.
+and its per-device override sub-flow. Selection is opt-in: no saved options
+means nothing is exposed.
 """
 
 from __future__ import annotations
@@ -405,6 +406,7 @@ def build_enhanced_device_set(
     states: list[Any],
     options: dict[str, Any],
     *,
+    include_all: bool = False,
     device_of: Callable[[str], str | None],
     name_of: Callable[[str], str | None] | None = None,
     area_of: Callable[[str], str | None] | None = None,
@@ -412,10 +414,11 @@ def build_enhanced_device_set(
 ) -> EnhancedDeviceSet:
     """Build the DuerOS device set (the only runtime path).
 
-    ``options[CONF_DEVICES]`` is ``{device_key: <normalized object>}``. When it
-    is ``None`` every exposable device is enrolled (candidate / fresh view,
-    all capabilities); otherwise only the listed devices are enrolled. Per
-    device the object may narrow capabilities (``caps``), hide entities
+    ``options[CONF_DEVICES]`` is ``{device_key: <normalized object>}``. Only the
+    listed devices are enrolled; when the key is absent (options never saved)
+    *nothing* is enrolled, because the user has not picked anything yet. The
+    options picker enumerates every device by passing ``include_all=True``.
+    Per device the object may narrow capabilities (``caps``), hide entities
     (``hidden``), force a role->entity binding (``bindings``), override
     appliance names (``names``) or force the build shape (``mode``).
 
@@ -427,6 +430,10 @@ def build_enhanced_device_set(
     profiles = REGISTRY.all_profiles()
     groups = _group_by_device(states, device_of)
     config = normalize(options.get(CONF_DEVICES))
+    if config is None and not include_all:
+        # Fail closed: an entry that never had its options saved must not push
+        # every entity to Baidu. ``{}`` selects no device.
+        config = {}
     sync_areas = bool(options.get(CONF_SYNC_AREAS, False))
     devices: list[DuerDevice] = []
     claimed: set[str] = set()
@@ -669,6 +676,7 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
     enhanced = build_enhanced_device_set(
         list(hass.states.async_all()),
         {},
+        include_all=True,  # the picker must offer every exposable device
         device_of=device_of,
         name_of=name_of,
         stable_id_of=stable_id_of,

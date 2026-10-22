@@ -344,3 +344,32 @@ async def test_unload_clears_cache_and_listeners(hass: HomeAssistant) -> None:
     hass.states.async_set("light.after_unload", "on")
     await _advance_past_debounce(hass)
     assert DATA_STRUCTURE_REFRESH_HANDLE not in hass.data.get(DOMAIN, {})
+
+
+async def test_nothing_exposed_until_devices_are_selected(hass: HomeAssistant) -> None:
+    """HACS review item 4: exposure is opt-in, never the default.
+
+    A fresh entry has no saved options, so discovery must advertise nothing to
+    Baidu; the options picker still enumerates the house, and only a saved
+    selection makes a device visible at runtime.
+    """
+    from custom_components.xiaodu_bridge.dueros.enhanced import (
+        build_candidate_devices,
+        build_enhanced_for_hass,
+    )
+
+    hass.states.async_set("light.kitchen", "on", {"friendly_name": "厨房灯"})
+
+    entry = MockConfigEntry(domain=DOMAIN, data=_entry_data())
+    entry.add_to_hass(hass)
+
+    assert build_enhanced_for_hass(hass, entry).all() == []
+    assert [c["device_key"] for c in build_candidate_devices(hass)] == [
+        "light.kitchen"
+    ]
+
+    hass.config_entries.async_update_entry(
+        entry, options={CONF_DEVICES: {"light.kitchen": {}}}
+    )
+    exposed = build_enhanced_for_hass(hass, entry).all()
+    assert [d.primary_entity_id for d in exposed] == ["light.kitchen"]

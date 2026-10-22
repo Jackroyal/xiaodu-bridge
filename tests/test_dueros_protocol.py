@@ -98,6 +98,7 @@ def _seed_enhanced(hass, config=None, device_of=None, name_of=None, area_of=None
     enhanced = enhanced_mod.build_enhanced_device_set(
         hass.states.async_all(),
         options,
+        include_all=config is None,  # no saved selection: enumerate everything
         device_of=device_of or (lambda eid: None),
         name_of=name_of,
         area_of=area_of,

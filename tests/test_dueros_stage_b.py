@@ -59,10 +59,11 @@ def _yuba_stable():
     }
 
 
-def _build(states, options=None, stable=None):
+def _build(states, options=None, stable=None, include_all=False):
     return enhanced_mod.build_enhanced_device_set(
         states,
         {"devices": options} if options is not None else {},
+        include_all=include_all,
         device_of=lambda eid: "yuba-dev",
         stable_id_of=(lambda eid: (stable or {}).get(eid)) if stable is not None else None,
     )
@@ -72,10 +73,17 @@ def _by_profile(es, profile_key):
     return [d for d in es.all() if d.profile_key == profile_key]
 
 
-def test_no_override_enrolls_every_device_default_all():
+def test_no_saved_options_enroll_nothing():
+    """An entry whose options were never saved must expose nothing."""
     es = _build(_YUBA_STATES, None, stable=_yuba_stable())
+    assert es.all() == []
+
+
+def test_include_all_enrolls_every_device():
+    """The options picker opts in to the full set explicitly."""
+    es = _build(_YUBA_STATES, None, stable=_yuba_stable(), include_all=True)
     assert any(d.profile_key == "YUBA" for d in es.all())
-    # The bathroom light is a leftover LIGHT appliance under default-all.
+    # The bathroom light is a leftover LIGHT appliance.
     assert any(d.profile_key == "light" for d in es.all())
 
 
@@ -88,7 +96,7 @@ def test_yuba_leftover_limited_to_light():
         FakeState("switch.yuba_plasma", "off", {"friendly_name": "杀菌 等离子开关"}),
         FakeState("switch.yuba_night_auto", "off", {"friendly_name": "自动化配置夜灯服务 自动化夜灯开关"}),
     ]
-    es = _build(states, None, stable=_yuba_stable())
+    es = _build(states, None, stable=_yuba_stable(), include_all=True)
     assert sorted(d.profile_key for d in es.all()) == ["YUBA", "light"]
     primaries = {d.primary_entity_id for d in es.all()}
     assert "switch.yuba_delay_stop" not in primaries
@@ -125,7 +133,7 @@ def test_yuba_matches_chinese_named_function_switch():
         FakeState("switch.fn_b", "off", {"friendly_name": "吹风"}),
         FakeState("switch.fn_c", "off", {"friendly_name": "换气"}),
     ]
-    es = _build(states, None, stable=None)
+    es = _build(states, None, stable=None, include_all=True)
     assert len(_by_profile(es, "YUBA")) == 1
     assert any(d.profile_key == "light" for d in es.all())
 

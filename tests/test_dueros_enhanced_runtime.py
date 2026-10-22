@@ -86,7 +86,8 @@ def _hass_with_enhanced():
     hass = FakeHass(states)
     options = {}  # default path: auto-detect profiles (no feature flag)
     enhanced = enhanced_mod.build_enhanced_device_set(
-        states, options, device_of=_device_of(), name_of=lambda k: {"yuba-device": "浴室浴霸"}.get(k)
+        states, options, include_all=True,
+        device_of=_device_of(), name_of=lambda k: {"yuba-device": "浴室浴霸"}.get(k),
     )
     assert enhanced
     hass.data = {DOMAIN: {DATA_ENHANCED_DEVICES: enhanced}}
@@ -163,7 +164,9 @@ def test_query_get_state_returns_attributes():
 def test_auto_detect_and_default_light_enrolled():
     # Default path: every device is enrolled (no feature flag).
     states = _states()
-    enhanced = enhanced_mod.build_enhanced_device_set(states, {}, device_of=_device_of())
+    enhanced = enhanced_mod.build_enhanced_device_set(
+        states, {}, include_all=True, device_of=_device_of()
+    )
     assert enhanced
     assert any(d.profile_key == "YUBA" for d in enhanced.all())
     # A plain light device (no profile) is enrolled through the generic
@@ -173,7 +176,9 @@ def test_auto_detect_and_default_light_enrolled():
     light_only = [
         FakeState("light.yeelink_cn_751118878_bslamp2_s_2_light", "off", {"friendly_name": "床头灯"}),
     ]
-    es2 = enhanced_mod.build_enhanced_device_set(light_only, {}, device_of=lambda eid: eid)
+    es2 = enhanced_mod.build_enhanced_device_set(
+        light_only, {}, include_all=True, device_of=lambda eid: eid
+    )
     assert es2
     dev = es2.all()[0]
     assert dev.device_id == "light.yeelink_cn_751118878_bslamp2_s_2_light"
@@ -206,6 +211,7 @@ def test_leftover_device_id_stable_across_rename_and_distinct_from_profile():
         return enhanced_mod.build_enhanced_device_set(
             states,
             {},
+            include_all=True,
             device_of=lambda eid: "yuba-device",
             name_of=lambda key: "浴室浴霸",
             stable_id_of=lambda eid: stable.get(eid),

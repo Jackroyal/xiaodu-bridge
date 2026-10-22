@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.14**.
+Current version: **v0.9.15**.
 
 ## Features
 
@@ -239,8 +239,10 @@ After adding the integration, open the integration entry → **Configure** and g
 **Xiaodu hub** page:
 
 1. The hub menu provides the device list, add / remove device, and save & finish.
-2. The device list shows "room · device name"; newly added devices expose all available
-   capabilities by default.
+2. The device list shows "room · device name". **Exposure is opt-in:** devices that
+   were never selected (including a fresh install that has not opened the options
+   page yet) are not sent to Xiaodu and do not show up in Discovery. Selected devices
+   expose all available capabilities by default, which can then be narrowed.
 3. Each device can select capabilities; `power` is force-enabled for controllable
    devices, while read-only capabilities such as `temperature` / `humidity` can be
    toggled as desired.

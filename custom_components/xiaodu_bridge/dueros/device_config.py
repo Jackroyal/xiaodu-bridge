@@ -11,9 +11,10 @@
     }
 
 Top-level semantics: a missing ``device_key`` means "not selected"; an absent /
-``None`` ``devices`` value is the default-all candidate view (every device
-exposed, all capabilities). A non-object value is treated as an unconfigured
-default-all device.
+``None`` ``devices`` value means nothing is selected yet (the runtime exposes
+nothing until the user picks devices; only the options picker enumerates the
+whole house). A non-object value for a *selected* device is treated as an
+unconfigured default-all device.
 
 This module is the single reader of that shape. Normalization is *read-side and
 idempotent* (it never writes back): :func:`_clean_object` keeps only the reserved
@@ -69,8 +70,8 @@ def _clean_object(raw: dict[str, Any]) -> dict[str, Any]:
 def normalize(devices: Any) -> dict[str, Any] | None:
     """Normalize the whole ``options[CONF_DEVICES]`` mapping.
 
-    ``None`` passes through (candidate / default-all view). Otherwise returns a
-    ``{device_key: object}`` mapping.
+    ``None`` passes through so the caller can tell "never configured" apart from
+    an empty selection. Otherwise returns a ``{device_key: object}`` mapping.
     """
     if devices is None:
         return None
