@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.16**.
+Current version: **v0.9.17**.
 
 ## Features
 

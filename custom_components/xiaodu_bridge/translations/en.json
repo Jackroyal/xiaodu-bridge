@@ -41,65 +41,65 @@
   "options": {
     "step": {
       "init": {
-        "title": "小度中枢",
-        "description": "选择要暴露给小度的 Home Assistant 设备。每个设备会列出它能提供的能力；点击设备可选择要启用的能力。\n\n可暴露设备数：{candidate_count}"
+        "title": "Xiaodu hub",
+        "description": "Choose the Home Assistant devices to expose to Xiaodu. Each device lists the capabilities it can provide; click a device to choose which capabilities to enable.\n\nExposable devices: {candidate_count}"
       },
       "devices": {
-        "title": "已选设备",
-        "description": "已选 {count} 台设备。点击设备可配置其能力。",
+        "title": "Selected devices",
+        "description": "{count} device(s) selected. Click a device to configure its capabilities.",
         "data": {}
       },
       "manage": {
-        "title": "添加 / 移除设备",
-        "description": "选择允许小度发现和控制的设备。",
+        "title": "Add / remove devices",
+        "description": "Choose the devices that Xiaodu is allowed to discover and control.",
         "data": {
-          "devices": "暴露给小度的设备",
-          "sync_areas": "同步 HA 房间到小度"
+          "devices": "Devices exposed to Xiaodu",
+          "sync_areas": "Sync HA areas to Xiaodu"
         }
       },
       "edit_device": {
-        "title": "设备能力",
-        "description": "配置「{device_name}」。\n\n开关能力始终启用，不可取消。",
+        "title": "Device capabilities",
+        "description": "Configure \"{device_name}\".\n\nPower is always enabled and cannot be disabled.",
         "data": {
-          "capabilities": "要启用的能力（多选）",
-          "action": "操作"
+          "capabilities": "Capabilities to enable (multi-select)",
+          "action": "Action"
         }
       },
       "device_advanced": {
-        "title": "高级配置",
-        "description": "「{device_name}」的覆写配置。\n\n- 能力（多选）：默认全选 = 全部启用（含以后新增的能力）；取消勾选以限制暴露的能力；电源始终启用。\n- 隐藏实体：被选中的实体不会暴露给小度（角色自动识别 / 聚合 / leftover 都会跳过它）。\n- 形态：把本设备强制按「单个设备拆分」或指定设备类型构建；强制形态构建不出设备时自动回退为拆分。\n- 角色绑定：把某个语义角色绑定到具体实体（选「自动识别」表示不绑定）。\n- 设备改名：可单独修改某个小度设备的展示名，不影响 Home Assistant 实体名。",
+        "title": "Advanced settings",
+        "description": "Overrides for \"{device_name}\".\n\n- Capabilities (multi-select): all selected by default = everything enabled (including capabilities added later); clear a box to narrow what is exposed; power is always enabled.\n- Hidden entities: selected entities are not exposed to Xiaodu (role detection / aggregation / leftovers all skip them).\n- Build shape: force this device to build as a single split device or as a specific device type; falls back to split when the forced shape produces nothing.\n- Role bindings: bind a semantic role to a specific entity (choose \"auto-detect\" for no binding).\n- Device names: override the display name of an individual Xiaodu device without touching the Home Assistant entity name.",
         "data": {
-          "capabilities": "要启用的能力",
-          "hidden": "隐藏实体（不暴露给小度）",
-          "mode": "构建形态",
-          "action": "操作"
+          "capabilities": "Capabilities to enable",
+          "hidden": "Hidden entities (not exposed to Xiaodu)",
+          "mode": "Build shape",
+          "action": "Action"
         },
         "sections": {
           "capabilities": {
-            "name": "能力",
-            "description": "本设备暴露给小度的能力；默认全选 = 全部启用（含以后新增的能力）。电源始终启用。"
+            "name": "Capabilities",
+            "description": "Capabilities this device exposes to Xiaodu; all selected by default = everything enabled (including capabilities added later). Power is always enabled."
           },
           "hidden_entities": {
-            "name": "隐藏实体",
-            "description": "选中的实体不会暴露给小度（角色自动识别 / 聚合 / leftover 都会跳过它）。"
+            "name": "Hidden entities",
+            "description": "Selected entities are not exposed to Xiaodu (role detection / aggregation / leftovers all skip them)."
           },
           "build_mode": {
-            "name": "构建形态",
-            "description": "把本设备强制按「单个设备拆分」或指定设备类型构建；构建不出设备时自动回退为拆分。"
+            "name": "Build shape",
+            "description": "Force this device to build as a single split device or as a specific device type; falls back to split when the forced shape produces nothing."
           },
           "role_bindings": {
-            "name": "角色绑定",
-            "description": "把某个语义角色绑定到具体实体；选「自动识别」表示不绑定。"
+            "name": "Role bindings",
+            "description": "Bind a semantic role to a specific entity; choose \"auto-detect\" for no binding."
           },
           "device_names": {
-            "name": "设备改名",
-            "description": "可单独修改某个小度设备的展示名，不影响 Home Assistant 实体名。"
+            "name": "Device names",
+            "description": "Override the display name of an individual Xiaodu device without touching the Home Assistant entity name."
           }
         }
       },
       "device_menu": {
-        "title": "设备设置",
-        "description": "为「{device_name}」选择要配置的内容：能力或高级设置。"
+        "title": "Device settings",
+        "description": "Choose what to configure for \"{device_name}\": capabilities or advanced settings."
       }
     }
   }
