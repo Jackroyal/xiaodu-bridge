@@ -1,6 +1,6 @@
 # Home Assistant Custom Integration: xiaodu bridge
 
-[![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 [![Hassfest](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml)
 [![HACS Validation](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml)
 
@@ -67,14 +67,9 @@ Current version: **v0.9.17**.
 
 ### HACS (recommended)
 
-`xiaodu bridge` is not yet in the HACS default store, so add it as a custom repository
-first:
-
 1. Make sure [HACS](https://hacs.xyz) is installed.
-2. Open **HACS → Integrations**, click `⋮` (top right) → **Custom repositories**,
-   enter `https://github.com/Jackroyal/xiaodu-bridge` and pick category **Integration**.
-3. Back in **HACS → Integrations**, search for **xiaodu bridge** and download it.
-4. Restart Home Assistant.
+2. Open **HACS → Integrations**, search for **xiaodu bridge** and download it.
+3. Restart Home Assistant.
 
 Downloading via HACS only puts the files in place. After the restart, go to
 **Settings → Devices & Services → Add Integration**, search for **xiaodu bridge** and add

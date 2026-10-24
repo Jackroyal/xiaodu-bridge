@@ -1,6 +1,6 @@
 # Home Assistant Custom Integration: xiaodu bridge
 
-[![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 [![Hassfest](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hassfest.yml)
 [![HACS Validation](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml/badge.svg)](https://github.com/Jackroyal/xiaodu-bridge/actions/workflows/hacs.yml)
 
@@ -45,13 +45,9 @@
 
 ### HACS（推荐）
 
-`xiaodu bridge` 尚未上架 HACS 默认商店，需要先添加为自定义仓库：
-
 1. 确认已安装 [HACS](https://hacs.xyz)。
-2. 打开 **HACS → Integrations**，右上角 `⋮` → **Custom repositories**，
-   地址填 `https://github.com/Jackroyal/xiaodu-bridge`，类别选择 **Integration**。
-3. 回到 **HACS → Integrations**，搜索 **xiaodu bridge**，下载。
-4. 重启 Home Assistant。
+2. 打开 **HACS → Integrations**，搜索 **xiaodu bridge**，下载。
+3. 重启 Home Assistant。
 
 HACS 下载只是把文件装到位。重启后还要在 **设置 → 设备与服务 → 添加集成**里
 搜索 **xiaodu bridge** 添加一次，在那里填写 OAuth 信息（见下文「配置集成」）。
