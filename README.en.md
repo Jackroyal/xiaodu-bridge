@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.17**.
+Current version: **v0.9.18**.
 
 ## Features
 
@@ -67,7 +67,9 @@ Current version: **v0.9.17**.
 
 ### HACS (recommended)
 
-1. Make sure [HACS](https://hacs.xyz) is installed.
+1. Make sure [HACS](https://hacs.xyz) is installed. HACS is **built into Home
+   Assistant 2026.11+** (as the Marketplace); on older versions install it from
+   [hacs.xyz](https://hacs.xyz) first.
 2. Open **HACS → Integrations**, search for **xiaodu bridge** and download it.
 3. Restart Home Assistant.
 

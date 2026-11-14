@@ -300,6 +300,24 @@ def _callback_origin(redirect_uri: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+def _verify_client_id(origin: str, request: web.Request) -> bool:
+    """Validate the callback origin as an IndieAuth client id.
+
+    Home Assistant 2026.11 made ``request_scheme`` / ``request_netloc``
+    mandatory: a client id that is a non-local IP address is only accepted when
+    it matches the origin the request was made to. Older releases take the
+    client id alone, so the keyword call is retried without them.
+    """
+    try:
+        return indieauth.verify_client_id(
+            origin,
+            request_scheme=request.scheme,
+            request_netloc=request.host,
+        )
+    except TypeError:  # pragma: no cover - HA < 2026.11 has no such parameters
+        return indieauth.verify_client_id(origin)
+
+
 def _redirect_uri_allowed(requested: str, configured: str) -> bool:
     """Accept the configured callback, or the same path on a known Xiaodu host.
 
@@ -671,7 +689,7 @@ class XiaoduOAuthAuthorizeView(HomeAssistantView):
         """Start or advance the login flow and return the raw flow result."""
         flow_mgr = hass.auth.login_flow
         client_id_origin = _callback_origin(redirect_uri)
-        if not indieauth.verify_client_id(client_id_origin):
+        if not _verify_client_id(client_id_origin, request):
             raise ValueError("invalid client id")
 
         if session.get("flow_id") is None:

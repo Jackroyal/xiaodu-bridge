@@ -77,6 +77,8 @@ class _Request:
         self.remote = PUBLIC_IP
         self.cookies = {SESSION_COOKIE: nonce} if nonce else {}
         self.headers: dict[str, str] = {}
+        self.scheme = "https"
+        self.host = "ha.example.com"
         self.rel_url = "/auth/xiaodu"
         self._form = {"username": "someone", "password": "secret"}
 
@@ -336,3 +338,49 @@ def test_session_table_is_capped(hass: HomeAssistant) -> None:
     assert len(sessions) == MAX_SESSIONS
     assert "s000" not in sessions  # oldest evicted to make room
     assert f"s{MAX_SESSIONS - 1:03d}" in sessions
+
+
+def test_client_id_check_passes_request_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HA 2026.11 requires the request scheme/host alongside the client id."""
+    seen: dict[str, str] = {}
+
+    def _new_signature(
+        client_id: str, *, request_scheme: str, request_netloc: str
+    ) -> bool:
+        seen.update(
+            client_id=client_id, scheme=request_scheme, netloc=request_netloc
+        )
+        return True
+
+    monkeypatch.setattr(oauth_server.indieauth, "verify_client_id", _new_signature)
+    request = SimpleNamespace(scheme="https", host="ha.example.com")
+
+    origin = oauth_server._callback_origin(REDIRECT_URI)
+
+    assert oauth_server._verify_client_id(origin, request)
+    assert seen == {
+        "client_id": origin,
+        "scheme": "https",
+        "netloc": "ha.example.com",
+    }
+
+
+def test_client_id_check_falls_back_on_older_ha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HA 2026.10 and earlier only take the client id; the retry must work."""
+    calls: list[str] = []
+
+    def _old_signature(client_id: str) -> bool:
+        calls.append(client_id)
+        return True
+
+    monkeypatch.setattr(oauth_server.indieauth, "verify_client_id", _old_signature)
+    request = SimpleNamespace(scheme="https", host="ha.example.com")
+
+    origin = oauth_server._callback_origin(REDIRECT_URI)
+
+    assert oauth_server._verify_client_id(origin, request)
+    assert calls == [origin]

@@ -238,6 +238,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _device_config_entries(device: dr.DeviceEntry) -> set[str]:
+    """Return the config entries a device belongs to, across registry versions.
+
+    HA 2026.x stores a single ``config_entry_id`` (a device belongs to exactly
+    one entry); older releases keep the ``config_entries`` set, which newer
+    releases deprecate.
+    """
+    entry_id = getattr(device, "config_entry_id", None)
+    if entry_id is not None:
+        return {entry_id}
+    return set(device.config_entries)
+
 
 def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Ensure exactly one hub device exists for this config entry.
@@ -252,7 +264,14 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     registry = dr.async_get(hass)
 
-    hub = registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    # HA 2026.8 scoped identifier lookups to a config entry
+    # (``async_get_device`` is deprecated there); older releases only offer the
+    # registry-wide lookup.
+    lookup = getattr(registry, "async_get_device_by_identifier", None)
+    if lookup is not None:
+        hub = lookup((DOMAIN, entry.entry_id), entry.entry_id)
+    else:  # pragma: no cover - HA < 2026.8
+        hub = registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
     if hub is None:
         hub = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -271,22 +290,27 @@ def _sync_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if hub.disabled_by is not None:
         # 中枢必须保持启用，才能出现在默认设备列表中。
         updates["disabled_by"] = None
-    if entry.entry_id not in hub.config_entries:
+    if entry.entry_id not in _device_config_entries(hub):
         updates["new_config_entry_id"] = entry.entry_id
     if updates:
         registry.async_update_device(hub.id, **updates)
 
     # 清理旧版每设备镜像条目（含 v0.9.1 的禁用镜像）。
-    for device in list(registry.devices.values()):
+    # ``DeviceRegistry.devices`` is a deprecated mapping view on HA 2026.11+;
+    # the per-entry helper is the supported, version-stable way to enumerate.
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
         if device.id == hub.id:
             continue
-        if entry.entry_id not in device.config_entries:
+        entries = _device_config_entries(device)
+        if entry.entry_id not in entries:
             continue
         if (DOMAIN, entry.entry_id) in device.identifiers:
             continue
         if not any(ids[0] == DOMAIN for ids in device.identifiers):
             continue
-        if len(device.config_entries) == 1:
+        # Only remove a device that belongs to us alone: a device shared with
+        # other config entries (a composite device on newer registries) stays.
+        if len(entries) == 1 and not getattr(device, "is_composite_device", False):
             registry.async_remove_device(device.id)
 
 
