@@ -16,7 +16,7 @@ standalone.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 
@@ -149,12 +149,32 @@ _AUXILIARY_MARKERS = (
 _AUXILIARY_NAME_KEYWORDS = ("指示灯", "提示音", "童锁", "物理控制锁", "故障")
 
 
-def _is_auxiliary(entity: Any) -> bool:
+def state_name(
+    entity: Any, name_of: Callable[[str], str | None] | None = None
+) -> str:
+    """Return an entity's display name.
+
+    ``name_of(entity_id)`` is the registry-resolved name injected by the hass
+    adapter (``entity_registry.async_get_full_entity_name`` where Home
+    Assistant offers it). ``friendly_name`` is being deprecated as a state
+    attribute, so it is only the fallback for older releases and for states
+    that have no registry entry.
+    """
+    if name_of is not None:
+        name = name_of(str(getattr(entity, "entity_id", "")))
+        if name:
+            return str(name)
+    return str((getattr(entity, "attributes", None) or {}).get("friendly_name", ""))
+
+
+def _is_auxiliary(
+    entity: Any, name_of: Callable[[str], str | None] | None = None
+) -> bool:
     """Return True for status/safety entities that should not be exposed."""
     entity_id = getattr(entity, "entity_id", "").lower()
     if any(marker in entity_id for marker in _AUXILIARY_MARKERS):
         return True
-    name = str((getattr(entity, "attributes", None) or {}).get("friendly_name", ""))
+    name = state_name(entity, name_of)
     return any(keyword in name for keyword in _AUXILIARY_NAME_KEYWORDS)
 
 
@@ -260,6 +280,8 @@ def classify_device(
     device_key: str,
     entities: Iterable[Any],
     metadata: dict[str, str] | None = None,
+    *,
+    name_of: Callable[[str], str | None] | None = None,
 ) -> str:
     """Classify a device group into a platform-agnostic device class.
 
@@ -272,7 +294,7 @@ def classify_device(
         haystack.append(metadata.get("model", ""))
     for state in entities:
         haystack.append(state.entity_id)
-        haystack.append(str(state.attributes.get("friendly_name", "")))
+        haystack.append(state_name(state, name_of))
     text = " ".join(haystack).lower()
     if any(marker in text for marker in _SOCKET_MARKERS):
         return DEVICE_CLASS_SOCKET

@@ -202,6 +202,19 @@ def test_is_auxiliary_entity_id_markers():
     assert not devices_mod._is_auxiliary(FakeState("light.bedroom", "on"))
 
 
+def test_state_name_prefers_resolver_then_falls_back():
+    state = FakeState("switch.x", "on", {"friendly_name": "旧名"})
+    assert devices_mod.state_name(state, lambda eid: "新名") == "新名"
+    assert devices_mod.state_name(state, lambda eid: None) == "旧名"
+    assert devices_mod.state_name(state) == "旧名"
+
+
+def test_is_auxiliary_uses_resolver_name():
+    state = FakeState("switch.aux", "off")
+    assert devices_mod._is_auxiliary(state, lambda eid: "风扇 童锁")
+    assert not devices_mod._is_auxiliary(state, lambda eid: "风扇 开关")
+
+
 def test_is_auxiliary_friendly_name_keywords():
     assert devices_mod._is_auxiliary(
         FakeState("switch.fan_alarm", "off", {"friendly_name": "风扇 提示音"})

@@ -330,13 +330,15 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
     if not states:
         return []
 
-    device_class = device_mod.classify_device(ctx.ha_device_id, states, None)
+    device_class = device_mod.classify_device(
+        ctx.ha_device_id, states, None, name_of=ctx.name_of_entity
+    )
     control_entities = [
         s
         for s in states
         if getattr(s, "domain", "") in device_mod.EXPOSABLE_DOMAINS
         and getattr(s, "domain", "") != "sensor"
-        and not device_mod._is_auxiliary(s)
+        and not device_mod._is_auxiliary(s, ctx.name_of_entity)
     ]
     if device_class == device_mod.DEVICE_CLASS_SOCKET:
         filtered = [s for s in control_entities if device_mod._socket_control_entity(s)]
@@ -372,7 +374,7 @@ def build_default_devices(ctx: DeviceBuildContext) -> list[DuerDevice]:
         # control entity of an exposable device is built here with all its
         # capabilities, and the per-device ``caps`` object is applied afterwards.
         kind = getattr(entity, "domain", "")
-        friendly = (getattr(entity, "attributes", None) or {}).get("friendly_name")
+        friendly = device_mod.state_name(entity, ctx.name_of_entity) or None
         # A single control entity keeps the device-registry name (e.g. 床头灯);
         # several control entities (e.g. a two-gang switch 筒灯/餐厅灯) surface
         # each under its own entity name instead of one shared device name. The

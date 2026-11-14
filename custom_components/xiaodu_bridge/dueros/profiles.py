@@ -12,8 +12,10 @@ roles explicitly; it must never be the sole source of truth.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
+from .. import devices as device_mod
 from .composers import (
     composite_power_mapping,
     cover_height_mapping,
@@ -124,8 +126,10 @@ _ROLE_RULES: dict[str, dict[str, Any]] = {
 }
 
 
-def _entity_text(state: Any) -> str:
-    name = str((getattr(state, "attributes", None) or {}).get("friendly_name", ""))
+def _entity_text(
+    state: Any, name_of: Callable[[str], str | None] | None = None
+) -> str:
+    name = device_mod.state_name(state, name_of)
     return f"{getattr(state, 'entity_id', '')} {name}".lower()
 
 
@@ -133,13 +137,19 @@ def _domain(state: Any) -> str:
     return getattr(state, "domain", "") or str(getattr(state, "entity_id", "")).split(".", 1)[0]
 
 
-def _rule_matches(state: Any, role: str, *, by_id: bool) -> bool:
+def _rule_matches(
+    state: Any,
+    role: str,
+    *,
+    by_id: bool,
+    name_of: Callable[[str], str | None] | None = None,
+) -> bool:
     rule = _ROLE_RULES.get(role)
     if rule is None:
         return False
     if rule.get("domains") and _domain(state) not in rule["domains"]:
         return False
-    text = _entity_text(state)
+    text = _entity_text(state, name_of)
     if any(marker in text for marker in rule.get("exclude", ())):
         return False
     eid = str(getattr(state, "entity_id", "")).lower()
@@ -148,9 +158,13 @@ def _rule_matches(state: Any, role: str, *, by_id: bool) -> bool:
     return any(marker in text for marker in rule.get("name_markers", ()))
 
 
-def match_role(state: Any, role: str) -> bool:
+def match_role(
+    state: Any, role: str, *, name_of: Callable[[str], str | None] | None = None
+) -> bool:
     """Return True when an entity looks like a semantic role (suggestion only)."""
-    return _rule_matches(state, role, by_id=True) or _rule_matches(state, role, by_id=False)
+    return _rule_matches(state, role, by_id=True, name_of=name_of) or _rule_matches(
+        state, role, by_id=False, name_of=name_of
+    )
 
 
 def _suggest_role(ctx: DeviceBuildContext, role: str) -> str | None:
@@ -158,10 +172,10 @@ def _suggest_role(ctx: DeviceBuildContext, role: str) -> str | None:
     if (explicit := ctx.entity_of(role)):
         return explicit
     for state in ctx.states:
-        if _rule_matches(state, role, by_id=True):
+        if _rule_matches(state, role, by_id=True, name_of=ctx.name_of_entity):
             return getattr(state, "entity_id", "")
     for state in ctx.states:
-        if _rule_matches(state, role, by_id=False):
+        if _rule_matches(state, role, by_id=False, name_of=ctx.name_of_entity):
             return getattr(state, "entity_id", "")
     return None
 
@@ -232,7 +246,9 @@ WORK_STATE_ALIASES = {
 
 # --- profile auto-match (confident, used for the default path) -----------------
 
-def _matches_yuba(states: Any) -> bool:
+def _matches_yuba(
+    states: Any, name_of: Callable[[str], str | None] | None = None
+) -> bool:
     """A bathroom heater has heating / blow / ventilation function switches.
 
     The light is deliberately *not* required: it surfaces as its own LIGHT
@@ -240,29 +256,35 @@ def _matches_yuba(states: Any) -> bool:
     Chinese/English markers in one place (``_ROLE_RULES``).
     """
     return any(
-        match_role(s, role)
+        match_role(s, role, name_of=name_of)
         for s in states
         for role in ("heating", "blow", "ventilation")
     )
 
 
-def _matches_sweeping_robot(states: Any) -> bool:
+def _matches_sweeping_robot(
+    states: Any, name_of: Callable[[str], str | None] | None = None
+) -> bool:
     return any(_domain(s) == "vacuum" for s in states)
 
 
-def _matches_clothes_rack(states: Any) -> bool:
+def _matches_clothes_rack(
+    states: Any, name_of: Callable[[str], str | None] | None = None
+) -> bool:
     for s in states:
         if _domain(s) == "cover" and (
             any(m in getattr(s, "entity_id", "").lower() for m in ("airer", "clothesrack", "clothes_rack"))
-            or "晾衣" in _entity_text(s)
+            or "晾衣" in _entity_text(s, name_of)
         ):
             return True
     return False
 
 
-def _matches_washing_machine(states: Any) -> bool:
+def _matches_washing_machine(
+    states: Any, name_of: Callable[[str], str | None] | None = None
+) -> bool:
     """A washing machine has a wash-program selector (by entity id or name)."""
-    return any(match_role(s, "wash_mode") for s in states)
+    return any(match_role(s, "wash_mode", name_of=name_of) for s in states)
 
 
 # --- YUBA (浴霸) --------------------------------------------------------------

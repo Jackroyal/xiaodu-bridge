@@ -59,13 +59,14 @@ def _yuba_stable():
     }
 
 
-def _build(states, options=None, stable=None, include_all=False):
+def _build(states, options=None, stable=None, include_all=False, name_of=None):
     return enhanced_mod.build_enhanced_device_set(
         states,
         {"devices": options} if options is not None else {},
         include_all=include_all,
         device_of=lambda eid: "yuba-dev",
         stable_id_of=(lambda eid: (stable or {}).get(eid)) if stable is not None else None,
+        name_of_entity=name_of,
     )
 
 
@@ -136,6 +137,21 @@ def test_yuba_matches_chinese_named_function_switch():
     es = _build(states, None, stable=None, include_all=True)
     assert len(_by_profile(es, "YUBA")) == 1
     assert any(d.profile_key == "light" for d in es.all())
+
+
+def test_registry_resolver_replaces_friendly_name():
+    """friendly_name is being deprecated; a registry resolver must drive both
+    profile matching and appliance naming when the attribute is gone."""
+    names = {
+        "light.main": "浴室 灯",
+        "switch.fn_a": "浴霸 暖风",
+        "switch.fn_b": "浴霸 吹风",
+        "switch.fn_c": "浴霸 换气",
+    }
+    states = [FakeState(entity_id, "on") for entity_id in names]
+    es = _build(states, None, stable=None, include_all=True, name_of=names.get)
+    assert len(_by_profile(es, "YUBA")) == 1
+    assert any(d.friendly_name == "浴室 灯" for d in es.all())
 
 
 def test_hidden_entity_stays_out_of_leftover():

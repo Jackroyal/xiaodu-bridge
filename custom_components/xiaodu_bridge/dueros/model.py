@@ -317,6 +317,9 @@ class DeviceBuildContext:
     # enhanced._filter_device).
     config: dict[str, Any] = field(default_factory=dict)
     stable_id_of: Callable[[str], str | None] | None = None
+    # Registry-resolved entity display name (``friendly_name`` is being
+    # deprecated as a state attribute; builders fall back to it when absent).
+    name_of_entity: Callable[[str], str | None] | None = None
     is_reachable: bool = True
 
     def entity_of(self, role: str) -> str | None:
@@ -351,7 +354,7 @@ class DuerDeviceProfile:
     key: str
     appliance_types: tuple[str, ...] = ()
     build: Callable[["DeviceBuildContext"], list["DuerDevice"]] | None = None
-    matches: Callable[[Any], bool] | None = None
+    matches: Callable[..., bool] | None = None
     # Domains allowed to surface as "leftover" generic appliances from the
     # entities this profile did not claim (``None`` = no restriction). A bath
     # heater declares ``("light",)`` so its config/feature switches are not each

@@ -99,14 +99,17 @@ def _group_by_device(
 
 
 def _display_name(
-    states: list[Any], name_of: Callable[[str], str | None] | None, key: str
+    states: list[Any],
+    name_of: Callable[[str], str | None] | None,
+    key: str,
+    name_of_entity: Callable[[str], str | None] | None = None,
 ) -> str:
     if name_of and (name := name_of(key)):
         return name
     for state in states:
-        friendly = (getattr(state, "attributes", None) or {}).get("friendly_name")
+        friendly = device_mod.state_name(state, name_of_entity)
         if friendly:
-            return str(friendly)
+            return friendly
     return key
 
 
@@ -411,6 +414,7 @@ def build_enhanced_device_set(
     name_of: Callable[[str], str | None] | None = None,
     area_of: Callable[[str], str | None] | None = None,
     stable_id_of: Callable[[str], str | None] | None = None,
+    name_of_entity: Callable[[str], str | None] | None = None,
 ) -> EnhancedDeviceSet:
     """Build the DuerOS device set (the only runtime path).
 
@@ -486,6 +490,7 @@ def build_enhanced_device_set(
                 config=obj,
                 bindings=dict(ctx_bindings or {}),
                 stable_id_of=stable_id_of,
+                name_of_entity=name_of_entity,
             )
 
         def _emit_generic(
@@ -509,16 +514,16 @@ def build_enhanced_device_set(
                 if getattr(s, "entity_id", "") not in claimed
                 and getattr(s, "domain", "") in device_mod.EXPOSABLE_DOMAINS
                 and getattr(s, "domain", "") != "sensor"
-                and not device_mod._is_auxiliary(s)
+                and not device_mod._is_auxiliary(s, name_of_entity)
                 and (allow is None or getattr(s, "domain", "") in allow)
             ]
             if not leftover:
                 return
-            first_name = (getattr(leftover[0], "attributes", None) or {}).get(
-                "friendly_name"
-            )
+            first_name = device_mod.state_name(leftover[0], name_of_entity)
             _emit_generic(
-                leftover, name=first_name or _display_name(group, name_of, device_key)
+                leftover,
+                name=first_name
+                or _display_name(group, name_of, device_key, name_of_entity),
             )
 
         forced: Any = None
@@ -535,7 +540,9 @@ def build_enhanced_device_set(
         if mode == "generic":
             # Skip the profile loop entirely: the whole group is built as
             # per-entity generic appliances; no leftover pass.
-            _emit_generic(group, name=_display_name(group, name_of, device_key))
+            _emit_generic(
+                group, name=_display_name(group, name_of, device_key, name_of_entity)
+            )
             continue
 
         # Profile builds aggregate several entities and resolve reachability
@@ -553,7 +560,8 @@ def build_enhanced_device_set(
             if profile.build is None:
                 continue
             if forced is None and (
-                profile.matches is None or not profile.matches(group)
+                profile.matches is None
+                or not profile.matches(group, name_of_entity)
             ):
                 continue
             ctx = _make_ctx(group, profile_key=profile.key, ctx_bindings=bindings)
@@ -588,8 +596,13 @@ def build_enhanced_device_set(
     return EnhancedDeviceSet(devices, claimed, enabled=True, sync_areas=sync_areas, areas=device_areas)
 
 
-def build_enhanced_for_hass(hass: Any, entry: Any) -> EnhancedDeviceSet:
-    """Build the enhanced device set for a config entry (registry-aware glue)."""
+def _registry_resolvers(hass: Any) -> SimpleNamespace:
+    """Build the registry closures shared by the hass-facing builders.
+
+    ``name_of_entity`` returns the registry-computed entity name on releases
+    that offer it (HA 2026.11+) and ``None`` elsewhere, in which case name
+    lookups fall back to the deprecated ``friendly_name`` state attribute.
+    """
     from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
     from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
@@ -597,6 +610,7 @@ def build_enhanced_for_hass(hass: Any, entry: Any) -> EnhancedDeviceSet:
     ent_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
     area_reg = ar.async_get(hass)
+    get_full_entity_name = getattr(er, "async_get_full_entity_name", None)
 
     def device_of(entity_id: str) -> str | None:
         row = ent_reg.async_get(entity_id)
@@ -617,13 +631,32 @@ def build_enhanced_for_hass(hass: Any, entry: Any) -> EnhancedDeviceSet:
         area = area_reg.async_get_area(device.area_id)
         return area.name if area else None
 
+    def name_of_entity(entity_id: str) -> str | None:
+        row = ent_reg.async_get(entity_id)
+        if row is None or get_full_entity_name is None:
+            return None
+        return get_full_entity_name(hass, row) or None
+
+    return SimpleNamespace(
+        device_of=device_of,
+        stable_id_of=stable_id_of,
+        name_of=name_of,
+        area_of=area_of,
+        name_of_entity=name_of_entity,
+    )
+
+
+def build_enhanced_for_hass(hass: Any, entry: Any) -> EnhancedDeviceSet:
+    """Build the enhanced device set for a config entry (registry-aware glue)."""
+    resolvers = _registry_resolvers(hass)
     return build_enhanced_device_set(
         list(hass.states.async_all()),
         dict(entry.options),
-        device_of=device_of,
-        name_of=name_of,
-        area_of=area_of,
-        stable_id_of=stable_id_of,
+        device_of=resolvers.device_of,
+        name_of=resolvers.name_of,
+        area_of=resolvers.area_of,
+        stable_id_of=resolvers.stable_id_of,
+        name_of_entity=resolvers.name_of_entity,
     )
 
 
@@ -646,54 +679,30 @@ def build_candidate_devices(hass: Any) -> list[dict[str, Any]]:
     are the union of every capability the device's appliances expose, so the
     UI can let the user pick a "设备 → 能力" set.
     """
-    from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
-    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
-    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
-
-    ent_reg = er.async_get(hass)
-    device_reg = dr.async_get(hass)
-    area_reg = ar.async_get(hass)
-
-    def device_of(entity_id: str) -> str | None:
-        row = ent_reg.async_get(entity_id)
-        return row.device_id if row and row.device_id else None
-
-    def stable_id_of(entity_id: str) -> str | None:
-        row = ent_reg.async_get(entity_id)
-        return row.unique_id if row and row.unique_id else None
-
-    def name_of(device_key: str) -> str | None:
-        device = device_reg.async_get(device_key)
-        return (device.name_by_user or device.name) if device else None
-
-    def area_of(device_key: str) -> str | None:
-        device = device_reg.async_get(device_key)
-        if not device or not device.area_id:
-            return None
-        area = area_reg.async_get_area(device.area_id)
-        return area.name if area else None
-
+    resolvers = _registry_resolvers(hass)
     enhanced = build_enhanced_device_set(
         list(hass.states.async_all()),
         {},
         include_all=True,  # the picker must offer every exposable device
-        device_of=device_of,
-        name_of=name_of,
-        stable_id_of=stable_id_of,
+        device_of=resolvers.device_of,
+        name_of=resolvers.name_of,
+        area_of=resolvers.area_of,
+        stable_id_of=resolvers.stable_id_of,
+        name_of_entity=resolvers.name_of_entity,
     )
     grouped: dict[str, list[DuerDevice]] = {}
     for dev in enhanced.all():
-        key = device_of(dev.primary_entity_id) or dev.primary_entity_id
+        key = resolvers.device_of(dev.primary_entity_id) or dev.primary_entity_id
         grouped.setdefault(key, []).append(dev)
 
     out: list[dict[str, Any]] = []
     for key in sorted(grouped):
         devs = grouped[key]
         caps = sorted({c.key for d in devs for c in d.capabilities})
-        name = name_of(key) or devs[0].friendly_name
+        name = resolvers.name_of(key) or devs[0].friendly_name
         # Prefix the HA room so same-named devices across rooms (e.g. several
         # Mi Home entities all named 灯) stay distinguishable in the picker.
-        area = area_of(key)
+        area = resolvers.area_of(key)
         out.append(
             {
                 "device_key": key,
@@ -717,23 +726,10 @@ def device_keys_for_profile(
     plus, for registered entities not loaded yet, synthesized stand-ins from the
     entity registry — config-entry setup order must not decide detection.
     """
-    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
 
     ent_reg = er.async_get(hass)
-    device_reg = dr.async_get(hass)
-
-    def device_of(entity_id: str) -> str | None:
-        row = ent_reg.async_get(entity_id)
-        return row.device_id if row and row.device_id else None
-
-    def stable_id_of(entity_id: str) -> str | None:
-        row = ent_reg.async_get(entity_id)
-        return row.unique_id if row and row.unique_id else None
-
-    def name_of(device_key: str) -> str | None:
-        device = device_reg.async_get(device_key)
-        return (device.name_by_user or device.name) if device else None
+    resolvers = _registry_resolvers(hass)
 
     states: dict[str, Any] = {s.entity_id: s for s in hass.states.async_all()}
     for row in ent_reg.entities.values():
@@ -749,14 +745,17 @@ def device_keys_for_profile(
     enhanced = build_enhanced_device_set(
         list(states.values()),
         dict(options or {}),
-        device_of=device_of,
-        name_of=name_of,
-        stable_id_of=stable_id_of,
+        device_of=resolvers.device_of,
+        name_of=resolvers.name_of,
+        stable_id_of=resolvers.stable_id_of,
+        name_of_entity=resolvers.name_of_entity,
     )
     keys: set[str] = set()
     for dev in enhanced.all():
         if dev.profile_key == profile_key:
-            keys.add(device_of(dev.primary_entity_id) or dev.primary_entity_id)
+            keys.add(
+                resolvers.device_of(dev.primary_entity_id) or dev.primary_entity_id
+            )
     return keys
 
 
@@ -768,31 +767,15 @@ def build_device_detail(hass: Any, device_key: str, obj: Any = None) -> dict[str
     :func:`build_device_detail_parts` (kept pure so the form logic can be unit
     tested without a Home Assistant runtime).
     """
-    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
-    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
-
-    ent_reg = er.async_get(hass)
-    device_reg = dr.async_get(hass)
-
-    def device_of(entity_id: str) -> str | None:
-        row = ent_reg.async_get(entity_id)
-        return row.device_id if row and row.device_id else None
-
-    def stable_id_of(entity_id: str) -> str | None:
-        row = ent_reg.async_get(entity_id)
-        return row.unique_id if row and row.unique_id else None
-
-    def name_of(key: str) -> str | None:
-        device = device_reg.async_get(key)
-        return (device.name_by_user or device.name) if device else None
-
+    resolvers = _registry_resolvers(hass)
     return build_device_detail_parts(
         list(hass.states.async_all()),
         device_key,
         obj,
-        device_of=device_of,
-        name_of=name_of,
-        stable_id_of=stable_id_of,
+        device_of=resolvers.device_of,
+        name_of=resolvers.name_of,
+        stable_id_of=resolvers.stable_id_of,
+        name_of_entity=resolvers.name_of_entity,
     )
 
 
@@ -804,6 +787,7 @@ def build_device_detail_parts(
     device_of: Callable[[str], str | None],
     name_of: Callable[[str], str | None] | None,
     stable_id_of: Callable[[str], str | None] | None,
+    name_of_entity: Callable[[str], str | None] | None = None,
 ) -> dict[str, Any]:
     """Describe one device for the advanced per-device options UI (HA-free core).
 
@@ -843,6 +827,7 @@ def build_device_detail_parts(
         device_of=device_of,
         name_of=name_of,
         stable_id_of=stable_id_of,
+        name_of_entity=name_of_entity,
     )
     devs = enhanced.all()
     name = name_of(device_key) or (devs[0].friendly_name if devs else device_key)
@@ -861,12 +846,10 @@ def build_device_detail_parts(
     def _as_entity(state: Any) -> dict[str, Any]:
         return {
             "id": getattr(state, "entity_id", ""),
-            "label": str(
-                (getattr(state, "attributes", None) or {}).get("friendly_name")
-                or getattr(state, "entity_id", "")
-            ),
+            "label": device_mod.state_name(state, name_of_entity)
+            or getattr(state, "entity_id", ""),
             "domain": getattr(state, "domain", ""),
-            "is_aux": device_mod._is_auxiliary(state),
+            "is_aux": device_mod._is_auxiliary(state, name_of_entity),
         }
 
     appliances = []
