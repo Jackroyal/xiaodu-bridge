@@ -33,18 +33,43 @@ def _no_structure_debounce(monkeypatch: pytest.MonkeyPatch) -> None:
         "custom_components.xiaodu_bridge.STRUCTURE_REFRESH_DEBOUNCE_SECONDS", 0
     )
 
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers import entity_registry as er
+from homeassistant.core import HomeAssistant  # noqa: E402
+from homeassistant.helpers import device_registry as dr  # noqa: E402
+from homeassistant.helpers import entity_registry as er  # noqa: E402
 
-from custom_components.xiaodu_bridge import (
+from custom_components.xiaodu_bridge import (  # noqa: E402
     async_remove_config_entry_device,
     _sync_device_registry,
     async_setup_entry,
     async_unload_entry,
     async_migrate_entry,
 )
-from custom_components.xiaodu_bridge.const import (
+
+
+def _device_by_identifier(registry, entry_id, identifier):
+    """Look a device up by identifier, across device-registry versions.
+
+    HA 2026.8 scoped identifier lookups to a config entry; older releases only
+    offer the registry-wide (now deprecated) lookup.
+    """
+    lookup = getattr(registry, "async_get_device_by_identifier", None)
+    if lookup is not None:
+        return lookup(identifier, entry_id)
+    return registry.async_get_device(identifiers={identifier})
+
+
+def _device_entries(device) -> set[str]:
+    """Config entries a device belongs to, across registry versions."""
+    entry_id = getattr(device, "config_entry_id", None)
+    return {entry_id} if entry_id is not None else set(device.config_entries)
+
+
+def _devices_for(registry, entry):
+    """Devices owned by a config entry (``DeviceRegistry.devices`` is a
+    deprecated mapping view on 2026.10+)."""
+    return dr.async_entries_for_config_entry(registry, entry.entry_id)
+
+from custom_components.xiaodu_bridge.const import (  # noqa: E402
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_DEVICES,
@@ -55,7 +80,7 @@ from custom_components.xiaodu_bridge.const import (
     DATA_STRUCTURE_UNSUBS,
     DOMAIN,
 )
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry  # noqa: E402
 
 
 def _entry_data() -> dict:
@@ -93,11 +118,7 @@ async def test_sync_device_registry_creates_single_hub(
 
     _sync_device_registry(hass, entry)
 
-    owned = [
-        device
-        for device in device_registry.devices.values()
-        if entry.entry_id in device.config_entries
-    ]
+    owned = _devices_for(device_registry, entry)
     assert len(owned) == 1
     hub = owned[0]
     assert hub.identifiers == {(DOMAIN, entry.entry_id)}
@@ -109,7 +130,9 @@ async def test_sync_device_registry_creates_single_hub(
     # Re-running the sync is idempotent and keeps user renames.
     device_registry.async_update_device(hub.id, name_by_user="我的中枢")
     _sync_device_registry(hass, entry)
-    hub = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    hub = _device_by_identifier(
+        device_registry, entry.entry_id, (DOMAIN, entry.entry_id)
+    )
     assert hub.name_by_user == "我的中枢"
 
 
@@ -132,15 +155,17 @@ async def test_sync_device_registry_cleans_up_legacy_mirrors(
         name="旧镜像设备",
         disabled_by=dr.DeviceEntryDisabler.INTEGRATION,
     )
-    assert entry.entry_id in legacy.config_entries
+    assert entry.entry_id in _device_entries(legacy)
 
     _sync_device_registry(hass, entry)
 
     assert (
-        device_registry.async_get_device(identifiers={(DOMAIN, "legacy-key")})
+        _device_by_identifier(device_registry, entry.entry_id, (DOMAIN, "legacy-key"))
         is None
     )
-    hub = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    hub = _device_by_identifier(
+        device_registry, entry.entry_id, (DOMAIN, entry.entry_id)
+    )
     assert hub is not None
 
 
@@ -156,7 +181,9 @@ async def test_remove_config_entry_device(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
     await async_setup_entry(hass, entry)
 
-    hub = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    hub = _device_by_identifier(
+        device_registry, entry.entry_id, (DOMAIN, entry.entry_id)
+    )
     assert hub is not None
 
     # Removing the hub only clears the registry entry; config stays intact.

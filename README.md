@@ -232,9 +232,11 @@ Home Assistant :8123
 ## 本地开发
 
 ```bash
-python -m venv .venv
+# Home Assistant 2026.11 的测试依赖要求 Python 3.14.2+
+python3.14 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[test]"
+# Python 3.14 上 setuptools 默认的 editable finder 尚不兼容，用 compat 模式
+pip install -e ".[test]" --config-settings editable_mode=compat
 pytest
 ```
 

@@ -271,9 +271,11 @@ After adding the integration, open the integration entry → **Configure** and g
 ## Local development
 
 ```bash
-python -m venv .venv
+# Testing against Home Assistant 2026.11 requires Python 3.14.2+
+python3.14 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[test]"
+# setuptools' default editable finder is not compatible with Python 3.14 yet
+pip install -e ".[test]" --config-settings editable_mode=compat
 pytest
 ```
 
