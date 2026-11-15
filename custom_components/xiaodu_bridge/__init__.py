@@ -27,7 +27,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
-from homeassistant.core import Event, HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.loader import async_get_integration
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import area_registry as ar
@@ -219,9 +219,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Keep the cached device set in sync with HA: registry changes (device /
     # entity / area add-update-remove) and entity add/remove invalidate it.
+    @callback
     def _on_registry_event(_event: Event) -> None:
         _schedule_device_set_refresh(hass)
 
+    @callback
     def _on_state_changed(event: Event) -> None:
         # Only entity add/remove alters the device-set structure (membership
         # and names of registered entities arrive via the registry events);

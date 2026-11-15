@@ -22,7 +22,7 @@ import logging
 import time
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import utc_from_timestamp
@@ -120,6 +120,7 @@ class TimedServiceManager:
     # ------------------------------------------------------------------
 
     def _arm(self, record: dict[str, Any]) -> None:
+        @callback
         def _on_time(_now: Any) -> None:
             self._hass.async_create_task(self._fire(record))
 
