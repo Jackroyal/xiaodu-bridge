@@ -208,6 +208,58 @@ def test_discovery_skips_unsupported_domains_and_sensors():
     assert "sensor.temp" in ids
 
 
+def test_discovery_with_no_selected_devices_returns_empty_list():
+    """No devices picked is a normal state: report zero appliances, not an error.
+
+    DuerOS then shows "no devices" on its side; a DriverInternalError here made
+    the skill itself look broken whenever the options had no device selected.
+    """
+    hass = _hass()
+    enhanced = _seed_enhanced(hass, config={})
+    assert not enhanced  # empty set, but not None
+
+    result = run(
+        handle_request(
+            hass,
+            enhanced,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {}),
+        )
+    )
+    assert result["header"]["name"] == "DiscoverAppliancesResponse"
+    assert result["payload"]["discoveredAppliances"] == []
+    assert result["payload"]["discoveredGroups"] == []
+
+
+def test_missing_device_set_still_errors():
+    """``None`` means the set could not be built; that keeps being an error."""
+    result = run(
+        handle_request(
+            _hass(),
+            None,
+            _request(NAMESPACE_DISCOVERY, "DiscoverAppliancesRequest", {}),
+        )
+    )
+    assert result["header"]["name"] == "DriverInternalError"
+
+
+def test_control_on_empty_device_set_reports_not_found():
+    """An empty set still cannot control anything: same per-appliance error."""
+    hass = _hass()
+    enhanced = _seed_enhanced(hass, config={})
+    result = run(
+        handle_request(
+            hass,
+            enhanced,
+            _request(
+                NAMESPACE_CONTROL,
+                "TurnOnRequest",
+                {"appliance": {"applianceId": "light.living"}},
+            ),
+        )
+    )
+    assert result["header"]["name"] == "DriverInternalError"
+
+
 def test_control_turn_on_calls_service_and_confirms():
     hass = _hass()
     result = run(

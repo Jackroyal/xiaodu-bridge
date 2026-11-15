@@ -22,7 +22,7 @@ client, and the integration receives requests via `/api/xiaodu` and
 private opaque token scoped to this integration; that token cannot access the
 Home Assistant API.
 
-Current version: **v0.9.18**.
+Current version: **v0.9.19**.
 
 ## Features
 
@@ -40,7 +40,9 @@ Current version: **v0.9.18**.
   tokens last 7 days, refresh tokens 30 days, with renewal. Issued tokens are private to
   this integration and cannot access the HA API.
 - **Discovery / Query / Control**: compatible with both the Xiaodu console mock-testing
-  DCS multipart and the production JSON messages.
+  DCS multipart and the production JSON messages. When no device has been selected yet,
+  Discovery returns an empty device list (Xiaodu shows "no devices") instead of failing
+  the skill.
 - **State reporting and timers**: sends a Change Report to Xiaodu when controllable
   device state changes; supports `timingTurnOn` / `timingTurnOff`, persisted and
   restored after restart.

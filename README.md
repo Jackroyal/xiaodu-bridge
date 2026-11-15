@@ -18,14 +18,14 @@
 `/api/xiaodu` 与 `/api/xiaodu/service` 接收请求，把 HA 实体映射为 DuerOS 语义设备，
 并签发仅限本集成使用的私有不透明 token；该 token 不能访问 Home Assistant API。
 
-当前集成版本：**v0.9.18**。
+当前集成版本：**v0.9.19**。
 
 ## 功能
 
 - **语义设备模型**：设备按 DuerOS 语义暴露，而不是拆成零散实体。浴霸、晾衣杆、扫地机、洗衣机有专用档案；灯、开关、风扇、空调、窗帘、媒体播放器、插座、温湿度传感器等按通用能力合成。
 - **配置流与选项流**：添加集成时配置 OAuth 凭证、botId、公网地址；添加后按「设备 → 能力」选择要暴露的设备，可对单个设备覆写：限制能力、隐藏实体、绑定语义角色、改展示名（不动 HA 实体名）。
 - **OAuth 2.0 服务端**：提供授权页与 Token 端点；Access Token 7 天、Refresh Token 30 天，支持续期。签发的 token 仅限本集成使用，不能访问 HA API。
-- **Discovery / Query / Control**：兼容小度控制台模拟测试的 DCS multipart 与线上 JSON 两种报文。
+- **Discovery / Query / Control**：兼容小度控制台模拟测试的 DCS multipart 与线上 JSON 两种报文；尚未选择任何设备时 Discovery 返回空设备列表（小度端显示「没有设备」），不会让技能报错。
 - **状态上报与定时**：可控设备状态变化时主动向小度发送 Change Report；支持 `timingTurnOn` / `timingTurnOff`，定时信息持久化，重启后自动恢复。
 - **设备与房间管理**：HA 区域可同步为 DuerOS `discoveredGroups`；设备注册表只保留一个「小度中枢」，实体改名不会让小度侧设备重建，设备集变更自动刷新，新设备无需重启即可被发现。
 

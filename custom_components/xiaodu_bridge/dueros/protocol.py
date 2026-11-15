@@ -460,7 +460,13 @@ async def handle_request(
         if fresh is not None:
             enhanced = fresh
 
-    if not enhanced:
+    # ``None`` means the set could not be built at all (no config entry, or the
+    # build raised): that is a real failure, so answer with an error. An empty
+    # *set*, however, is a normal state — the user has selected no devices — and
+    # Discovery must report zero appliances instead of failing; DuerOS then
+    # shows "no devices" rather than a skill error. Control/Query against an
+    # empty set fall through to their per-appliance "not found" errors below.
+    if enhanced is None:
         return _error_response(header, ERROR_DEVICE_NOT_FOUND)
 
     appliance_id = str(payload.get("appliance", {}).get("applianceId", ""))
